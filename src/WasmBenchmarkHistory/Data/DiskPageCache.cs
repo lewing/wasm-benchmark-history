@@ -53,11 +53,18 @@ public sealed class DiskPageCache
         }
 
         var path = Environment.ExpandEnvironmentVariables(configuredPath);
-        if (path == "~" || path.StartsWith($"~{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+        if (path == "~")
         {
+            path = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+        else if (path.Length > 1 && path[0] == '~' && path[1] is '/' or '\\')
+        {
+            var relativePath = path[2..]
+                .Replace('/', Path.DirectorySeparatorChar)
+                .Replace('\\', Path.DirectorySeparatorChar);
             path = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                path.Length == 1 ? string.Empty : path[2..]);
+                relativePath);
         }
 
         return Path.GetFullPath(path);
