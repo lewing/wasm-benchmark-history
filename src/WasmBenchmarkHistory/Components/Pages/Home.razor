@@ -1,0 +1,411 @@
+﻿@page "/"
+@implements IDisposable
+@inject BenchmarkHistoryService HistoryService
+
+<PageTitle>WASM benchmark history</PageTitle>
+
+<section class="hero">
+    <p class="eyebrow">PUBLIC PERFORMANCE DATA</p>
+    <h1>Compare .NET WASM performance across runtime modes.</h1>
+    <p class="lede">
+        Explore primary microbenchmark histories from <strong>dotnet/performance</strong>.
+        Pages are fetched on demand and comparisons use exact build identities.
+    </p>
+</section>
+
+@if (_catalog is null)
+{
+    <section class="loading-panel" aria-live="polite">
+        <span class="spinner"></span>
+        <div>
+            <strong>Loading three benchmark indexes</strong>
+            <p>History pages stay untouched until you choose a benchmark.</p>
+        </div>
+    </section>
+}
+else
+{
+    <section class="catalog-summary" aria-label="Catalog summary">
+        <div><strong>@_catalogTotal.ToString("N0")</strong><span>unique benchmarks</span></div>
+        <div><strong>@_sharedTotal.ToString("N0")</strong><span>shared by all runs</span></div>
+        @foreach (var run in KnownRunConfigurations.All)
+        {
+            <div>
+                <strong>@_runTotals[run.Id].ToString("N0")</strong>
+                <span>@run.DisplayName</span>
+            </div>
+        }
+    </section>
+
+    <section class="control-panel">
+        <div class="search-area">
+            <label for="benchmark-search">1. Find a benchmark</label>
+            <div class="search-box">
+                <span aria-hidden="true">⌕</span>
+                <input id="benchmark-search"
+                       type="search"
+                       value="@_searchText"
+                       @oninput="OnSearchInput"
+                       placeholder="Search by namespace, method, or parameter…"
+                       autocomplete="off" />
+            </div>
+
+            @if (SearchResults.Count > 0)
+            {
+                <div class="search-results">
+                    @foreach (var entry in SearchResults)
+                    {
+                        <button type="button" @onclick="() => SelectBenchmark(entry)">
+                            <span class="result-name">@entry.Benchmark</span>
+                            <span class="availability @(entry.IsShared ? "shared" : "partial")">
+                                @(entry.IsShared ? "3/3 shared" : $"{entry.Pages.Count}/3 runs")
+                            </span>
+                        </button>
+                    }
+                </div>
+            }
+            else if (!string.IsNullOrWhiteSpace(_searchText) && _selectedBenchmark is null)
+            {
+                <p class="empty-search">No benchmark in the loaded indexes matches this search.</p>
+            }
+        </div>
+
+        <div class="run-area">
+            <label>2. Choose 2–3 run configurations</label>
+            <div class="run-options">
+                @foreach (var run in KnownRunConfigurations.All)
+                {
+                    var available = _selectedBenchmark?.Pages.ContainsKey(run.Id) ?? false;
+                    <label class="run-option @(available ? null : "unavailable")">
+                        <input type="checkbox"
+                               checked="@_selectedRunIds.Contains(run.Id)"
+                               disabled="@(!available)"
+                               @onchange="() => ToggleRun(run.Id)" />
+                        <span class="series-swatch" style="background:@run.Color"></span>
+                        <span>
+                            <strong>@run.DisplayName</strong>
+                            <small>@(available ? run.Description : "Not available for this benchmark")</small>
+                        </span>
+                    </label>
+                }
+            </div>
+        </div>
+
+        <div class="load-area">
+            @if (_selectedBenchmark is not null)
+            {
+                <div class="selected-benchmark">
+                    <span>Selected</span>
+                    <strong>@_selectedBenchmark.Benchmark</strong>
+                    <small class="@(_selectedBenchmark.IsShared ? "shared-text" : "partial-text")">
+                        @_selectedBenchmark.Availability
+                    </small>
+                </div>
+            }
+            else
+            {
+                <p>Select a search result to configure the comparison.</p>
+            }
+
+            <button class="primary-button"
+                    type="button"
+                    disabled="@(!CanLoad)"
+                    @onclick="LoadHistoriesAsync">
+                @if (_isLoadingHistories)
+                {
+                    <span class="button-spinner"></span>
+                    <span>Loading histories…</span>
+                }
+                else
+                {
+                    <span>Compare histories</span>
+                    <span aria-hidden="true">→</span>
+                }
+            </button>
+        </div>
+    </section>
+}
+
+@if (_errorMessage is not null)
+{
+    <div class="error-banner" role="alert">
+        <strong>Data could not be loaded.</strong>
+        <span>@_errorMessage</span>
+    </div>
+}
+
+@if (_histories.Count > 0)
+{
+    <section class="results-heading">
+        <div>
+            <p class="eyebrow">PRIMARY TRACE HISTORY</p>
+            <h2>@_histories[0].Benchmark</h2>
+            <p>
+                @_histories.Sum(history => history.Observations.Count).ToString("N0") observations
+                across @_histories.Count run configurations
+            </p>
+        </div>
+        <label class="mode-toggle">
+            <input type="checkbox" @bind="_normalized" />
+            <span>Normalize to @_histories[0].Run.DisplayName</span>
+        </label>
+    </section>
+
+    <HistoryChart Histories="_histories" Matches="_matches" Normalized="_normalized" />
+
+    <section class="comparison-section">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">STRICT BUILD MATCHES</p>
+                <h2>Point-by-point comparison</h2>
+            </div>
+            <span class="match-count">@_matches.Count.ToString("N0") matches</span>
+        </div>
+        <p class="match-rule">
+            Rows appear only when <strong>timestamp + runtime SHA + performance repo SHA</strong>
+            are identical in every selected run. Timestamp-only fallback is never used.
+        </p>
+
+        @if (_matches.Count == 0)
+        {
+            <div class="no-matches">
+                <strong>No strict matches found.</strong>
+                <p>The selected histories do not share observations from the exact same builds.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-note">
+                Showing @DisplayedMatches.Count.ToString("N0") most recent
+                @if (_matches.Count > DisplayLimit)
+                {
+                    <span> of @_matches.Count.ToString("N0")</span>
+                }
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Build identities</th>
+                            @foreach (var history in _histories)
+                            {
+                                <th>
+                                    <span class="header-swatch" style="background:@history.Run.Color"></span>
+                                    @history.Run.DisplayName
+                                </th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var match in DisplayedMatches)
+                        {
+                            var baseline = match.Observations[_histories[0].Run.Id];
+                            <tr>
+                                <td class="timestamp-cell">@match.Key.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td class="sha-cell">
+                                    <span>runtime <code title="@match.Key.RuntimeSha">@ShortSha(match.Key.RuntimeSha)</code></span>
+                                    <span>performance <code title="@match.Key.PerformanceSha">@ShortSha(match.Key.PerformanceSha)</code></span>
+                                </td>
+                                @foreach (var history in _histories)
+                                {
+                                    var observation = match.Observations[history.Run.Id];
+                                    <td class="value-cell">
+                                        <strong>@FormatValue(observation.Value)</strong>
+                                        @if (observation.Error is not null)
+                                        {
+                                            <span> ± @FormatValue(observation.Error.Value)</span>
+                                        }
+                                        @if (baseline.Value == 0)
+                                        {
+                                            <small title="Ratio is undefined because the baseline is zero">—</small>
+                                        }
+                                        else
+                                        {
+                                            <small>@((observation.Value / baseline.Value).ToString("0.000×", CultureInfo.InvariantCulture))</small>
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private const int DisplayLimit = 250;
+
+    private BenchmarkCatalog? _catalog;
+    private BenchmarkCatalogEntry? _selectedBenchmark;
+    private string _searchText = string.Empty;
+    private readonly HashSet<string> _selectedRunIds = new(StringComparer.Ordinal);
+    private IReadOnlyList<BenchmarkHistory> _histories = [];
+    private IReadOnlyList<MatchedComparison> _matches = [];
+    private string? _errorMessage;
+    private bool _isLoadingHistories;
+    private bool _normalized;
+    private long _loadVersion;
+    private CancellationTokenSource? _loadCancellation;
+    private int _catalogTotal;
+    private int _sharedTotal;
+    private IReadOnlyDictionary<string, int> _runTotals =
+        new Dictionary<string, int>(StringComparer.Ordinal);
+
+    private IReadOnlyList<BenchmarkCatalogEntry> SearchResults =>
+        _catalog is null || string.IsNullOrWhiteSpace(_searchText) || _selectedBenchmark is not null
+            ? []
+            : _catalog.Entries
+                .Where(entry => entry.Benchmark.Contains(
+                    _searchText.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(entry => entry.IsShared)
+                .ThenBy(entry => entry.Benchmark.Length)
+                .Take(12)
+                .ToArray();
+
+    private bool CanLoad =>
+        _selectedBenchmark is not null
+        && _selectedRunIds.Count is >= 2 and <= 3
+        && !_isLoadingHistories;
+
+    private IReadOnlyList<MatchedComparison> DisplayedMatches =>
+        _matches.TakeLast(DisplayLimit).Reverse().ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _catalog = await HistoryService.LoadCatalogAsync();
+            _catalogTotal = _catalog.Entries.Count;
+            _sharedTotal = _catalog.Entries.Count(entry => entry.IsShared);
+            _runTotals = KnownRunConfigurations.All.ToDictionary(
+                run => run.Id,
+                run => _catalog.Entries.Count(entry => entry.Pages.ContainsKey(run.Id)),
+                StringComparer.Ordinal);
+        }
+        catch (BenchmarkDataException exception)
+        {
+            _errorMessage = exception.Message;
+        }
+    }
+
+    private void OnSearchInput(ChangeEventArgs eventArgs)
+    {
+        _searchText = eventArgs.Value?.ToString() ?? string.Empty;
+        if (_selectedBenchmark is not null
+            && !string.Equals(_searchText, _selectedBenchmark.Benchmark, StringComparison.Ordinal))
+        {
+            InvalidateCurrentLoad();
+            _selectedBenchmark = null;
+            _selectedRunIds.Clear();
+            _histories = [];
+            _matches = [];
+        }
+    }
+
+    private void SelectBenchmark(BenchmarkCatalogEntry entry)
+    {
+        InvalidateCurrentLoad();
+        _selectedBenchmark = entry;
+        _searchText = entry.Benchmark;
+        _selectedRunIds.Clear();
+        foreach (var run in KnownRunConfigurations.All.Where(run => entry.Pages.ContainsKey(run.Id)))
+        {
+            _selectedRunIds.Add(run.Id);
+        }
+
+        _histories = [];
+        _matches = [];
+        _errorMessage = null;
+        _normalized = false;
+    }
+
+    private void ToggleRun(string runId)
+    {
+        InvalidateCurrentLoad();
+        if (!_selectedRunIds.Remove(runId))
+        {
+            _selectedRunIds.Add(runId);
+        }
+
+        _histories = [];
+        _matches = [];
+    }
+
+    private async Task LoadHistoriesAsync()
+    {
+        if (_catalog is null || _selectedBenchmark is null || !CanLoad)
+        {
+            return;
+        }
+
+        InvalidateCurrentLoad();
+        var loadVersion = _loadVersion;
+        var loadCancellation = new CancellationTokenSource();
+        _loadCancellation = loadCancellation;
+        _isLoadingHistories = true;
+        _errorMessage = null;
+        _histories = [];
+        _matches = [];
+        _normalized = false;
+
+        try
+        {
+            var orderedRunIds = KnownRunConfigurations.All
+                .Where(run => _selectedRunIds.Contains(run.Id))
+                .Select(run => run.Id)
+                .ToArray();
+            var histories = await HistoryService.LoadHistoriesAsync(
+                _catalog,
+                _selectedBenchmark.Benchmark,
+                orderedRunIds,
+                loadCancellation.Token);
+            if (loadVersion != _loadVersion)
+            {
+                return;
+            }
+
+            _histories = histories;
+            _matches = ObservationMatcher.MatchStrict(histories);
+        }
+        catch (OperationCanceledException) when (loadCancellation.IsCancellationRequested)
+        {
+        }
+        catch (BenchmarkDataException exception)
+        {
+            if (loadVersion == _loadVersion)
+            {
+                _errorMessage = exception.Message;
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_loadCancellation, loadCancellation))
+            {
+                _loadCancellation = null;
+                loadCancellation.Dispose();
+                _isLoadingHistories = false;
+            }
+        }
+    }
+
+    private void InvalidateCurrentLoad()
+    {
+        _loadVersion++;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        _loadCancellation = null;
+        _isLoadingHistories = false;
+    }
+
+    public void Dispose() => InvalidateCurrentLoad();
+
+    private static string ShortSha(string sha) =>
+        sha.Length <= 8 ? sha : sha[..8];
+
+    private static string FormatValue(double value) =>
+        value.ToString(value >= 100 ? "N2" : "N4", CultureInfo.InvariantCulture);
+}
