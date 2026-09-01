@@ -1,0 +1,25 @@
+<html>
+<body>
+<script>
+var trendData = {};
+var defaultCounter = new CounterEntry(42, "fixture");
+trendData[42] = [
+{
+    "x": ['2026-08-30 10:20:30', '2026-08-31 11:21:31'],
+    "y": [10.5, 11.75],
+    "gitHash": {
+        "runtime": ['runtime-a', 'runtime-b']
+    },
+    "name": 'primary \'trace',
+    "error_y": { "type": 'data', "array": [0.25, null] },
+    "perfRepoHash": ['performance-a', 'performance-b']
+},
+{
+    "x": ['2026-08-30 10:20:30', '2026-08-31 11:21:31'],
+    "y": [999, 999],
+    "name": 'Moving Average'
+}
+];
+</script>
+</body>
+</html>

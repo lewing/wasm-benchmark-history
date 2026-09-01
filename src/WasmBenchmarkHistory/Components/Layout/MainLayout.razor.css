@@ -1,0 +1,87 @@
+.site-header {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+    margin: 0 auto;
+    max-width: 1440px;
+    padding: 1.25rem clamp(1rem, 4vw, 3.5rem);
+}
+
+.brand {
+    align-items: center;
+    color: var(--ink);
+    display: inline-flex;
+    gap: .8rem;
+    text-decoration: none;
+}
+
+.brand-mark {
+    align-items: center;
+    background: var(--accent);
+    border-radius: .7rem;
+    color: #071225;
+    display: flex;
+    font-size: 1.15rem;
+    font-weight: 850;
+    height: 2.5rem;
+    justify-content: center;
+    width: 2.5rem;
+}
+
+.brand strong,
+.brand small {
+    display: block;
+}
+
+.brand strong {
+    font-size: .95rem;
+    letter-spacing: -.01em;
+}
+
+.brand small {
+    color: var(--muted);
+    font-size: .72rem;
+    margin-top: .1rem;
+}
+
+.source-link {
+    color: var(--muted);
+    font-size: .82rem;
+    text-decoration: none;
+}
+
+.source-link:hover {
+    color: var(--ink);
+}
+
+main {
+    margin: 0 auto;
+    max-width: 1440px;
+    padding: 1.5rem clamp(1rem, 4vw, 3.5rem) 4rem;
+}
+
+#blazor-error-ui {
+    background: #ffdf8b;
+    bottom: 0;
+    box-shadow: 0 -1px 8px rgb(0 0 0 / 20%);
+    box-sizing: border-box;
+    color: #211700;
+    display: none;
+    left: 0;
+    padding: .8rem 3rem .8rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 1rem;
+}
+
+@media (max-width: 560px) {
+    .source-link {
+        display: none;
+    }
+}

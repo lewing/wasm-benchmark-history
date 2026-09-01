@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WasmBenchmarkHistory/WasmBenchmarkHistory.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WasmBenchmarkHistory.Tests/WasmBenchmarkHistory.Tests.csproj" />
+  </Folder>
+</Solution>

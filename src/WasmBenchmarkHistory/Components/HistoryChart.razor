@@ -1,0 +1,410 @@
+@if (Series.Count == 0)
+{
+    <div class="chart-empty">
+        <strong>No strictly matched points are available to normalize.</strong>
+        <span>Switch back to raw values to view the complete histories.</span>
+    </div>
+}
+else
+{
+    <div class="chart-shell">
+        <div class="legend">
+            @foreach (var series in Series)
+            {
+                <span>
+                    <i style="background:@series.History.Run.Color"></i>
+                    <strong>@series.History.Run.DisplayName</strong>
+                    <small>@series.Points.Count.ToString("N0") points</small>
+                </span>
+            }
+        </div>
+
+        <div class="plot-area">
+            <div class="svg-wrap">
+                <svg viewBox="0 0 1000 430"
+                     preserveAspectRatio="none"
+                     role="img"
+                     aria-label="Historical benchmark line chart"
+                     aria-describedby="chart-hover-instructions"
+                     @onpointerleave="OnChartPointerLeave">
+                    <rect class="plot-background" x="@PlotLeft" y="@PlotTop" width="@PlotWidth" height="@PlotHeight" rx="8" />
+
+                    @for (var tick = 0; tick <= 4; tick++)
+                    {
+                        var y = PlotTop + PlotHeight * tick / 4d;
+                        <line class="grid-line" x1="@PlotLeft" y1="@y" x2="@(PlotLeft + PlotWidth)" y2="@y" />
+                        <svg:text class="axis-label" x="@(PlotLeft - 12)" y="@(y + 4)" text-anchor="end">
+                            @FormatAxisValue(MaxY - (MaxY - MinY) * tick / 4d)
+                        </svg:text>
+                    }
+
+                    @for (var tick = 0; tick <= 4; tick++)
+                    {
+                        var x = PlotLeft + PlotWidth * tick / 4d;
+                        <line class="grid-line vertical" x1="@x" y1="@PlotTop" x2="@x" y2="@(PlotTop + PlotHeight)" />
+                        <svg:text class="axis-label" x="@x" y="@(PlotTop + PlotHeight + 28)" text-anchor="middle">
+                            @FormatDate(MinTicks + (long)((MaxTicks - MinTicks) * tick / 4d))
+                        </svg:text>
+                    }
+
+                    @foreach (var series in Series)
+                    {
+                        <polyline class="series-line"
+                                  points="@Polyline(series.Points)"
+                                  stroke="@series.History.Run.Color" />
+
+                        @foreach (var point in SamplePoints(series.Points))
+                        {
+                            <circle class="series-point"
+                                    cx="@ScaleX(point.Timestamp.Ticks)"
+                                    cy="@ScaleY(point.Value)"
+                                    r="3.2"
+                                    fill="@series.History.Run.Color" />
+                        }
+                    }
+
+                    @if (_hover is not null)
+                    {
+                        <line class="hover-crosshair"
+                              x1="@ScaleX(_hover.Timestamp.Ticks)"
+                              y1="@PlotTop"
+                              x2="@ScaleX(_hover.Timestamp.Ticks)"
+                              y2="@(PlotTop + PlotHeight)" />
+                        @foreach (var point in _hover.Points)
+                        {
+                            <circle class="hover-point-halo"
+                                    cx="@ScaleX(point.Observation.Timestamp.Ticks)"
+                                    cy="@ScaleY(point.DisplayValue)"
+                                    r="8"
+                                    fill="@point.History.Run.Color" />
+                            <circle class="hover-point"
+                                    cx="@ScaleX(point.Observation.Timestamp.Ticks)"
+                                    cy="@ScaleY(point.DisplayValue)"
+                                    r="4.5"
+                                    fill="@point.History.Run.Color" />
+                        }
+                    }
+
+                    @foreach (var region in _hitRegions)
+                    {
+                        <rect class="interaction-band"
+                              @key="region.TimelineIndex"
+                              x="@region.X"
+                              y="@PlotTop"
+                              width="@region.Width"
+                              height="@PlotHeight"
+                              @onpointerenter="() => SelectTimeline(region.TimelineIndex)"
+                              @onclick="() => SelectTimeline(region.TimelineIndex)" />
+                    }
+                </svg>
+            </div>
+
+            <input class="keyboard-scrubber"
+                   type="range"
+                   min="0"
+                   max="@Math.Max(0, _hoverIndex.Timestamps.Count - 1)"
+                   step="1"
+                   value="@(_hover?.TimelineIndex ?? Math.Max(0, _hoverIndex.Timestamps.Count - 1))"
+                   aria-label="Chart timestamp"
+                   aria-valuetext="@KeyboardValueText"
+                   aria-describedby="@(_hover is null ? "chart-hover-instructions" : "chart-hover-instructions chart-hover-card")"
+                   @onfocus="OnScrubberFocus"
+                   @onblur="OnScrubberBlur"
+                   @oninput="OnScrubberInput" />
+
+            @if (_hover is not null)
+            {
+                <div id="chart-hover-card"
+                     class="hover-card @(_hoverCardPercent > 63 ? "flip" : null)"
+                     style="left:@(_hoverCardPercent.ToString("0.##", CultureInfo.InvariantCulture))%"
+                     role="status"
+                     aria-live="@(_hasKeyboardFocus ? "polite" : "off")">
+                    <header>
+                        <div>
+                            <span>@(_hover.HasStrictComparison ? "STRICT BUILD MATCH" : "NEAREST SAMPLES")</span>
+                            <strong>@_hover.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</strong>
+                        </div>
+                        <span class="mode-badge">@(Normalized ? "normalized" : "raw")</span>
+                    </header>
+
+                    <div class="hover-runs">
+                        @foreach (var point in _hover.Points)
+                        {
+                            <section>
+                                <div class="hover-run-heading">
+                                    <i style="background:@point.History.Run.Color"></i>
+                                    <strong>@point.History.Run.DisplayName</strong>
+                                    @if (!point.IsExactTimestamp)
+                                    {
+                                        <small>nearest @point.Observation.Timestamp.ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</small>
+                                    }
+                                </div>
+                                <div class="hover-measure">
+                                    <span>Value</span>
+                                    <strong>@FormatValue(point.Observation.Value)@FormatError(point.Observation.Error)</strong>
+                                    @if (point.StrictRatio is not null)
+                                    {
+                                        <em>@point.StrictRatio.Value.ToString("0.000×", CultureInfo.InvariantCulture)</em>
+                                    }
+                                </div>
+                                <dl>
+                                    <div>
+                                        <dt>runtime</dt>
+                                        <dd><code title="@point.Observation.RuntimeSha" aria-label="runtime SHA @point.Observation.RuntimeSha">@ShortSha(point.Observation.RuntimeSha)</code></dd>
+                                    </div>
+                                    <div>
+                                        <dt>performance</dt>
+                                        <dd><code title="@point.Observation.PerformanceSha" aria-label="performance repository SHA @point.Observation.PerformanceSha">@ShortSha(point.Observation.PerformanceSha)</code></dd>
+                                    </div>
+                                    <div>
+                                        <dt>trace/build</dt>
+                                        <dd title="@point.Observation.TraceName">@(point.Observation.TraceName ?? "not reported")</dd>
+                                    </div>
+                                </dl>
+                            </section>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="chart-caption">
+            <span>@(Normalized ? "Ratio to the first selected run on strict matches" : "Raw reported primary-trace values")</span>
+            <span id="chart-hover-instructions">Hover the plot or focus it and use ←/→, Home, and End</span>
+        </div>
+    </div>
+}
+
+@code {
+    private const double PlotLeft = 86;
+    private const double PlotTop = 24;
+    private const double PlotWidth = 884;
+    private const double PlotHeight = 340;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<BenchmarkHistory> Histories { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<MatchedComparison> Matches { get; set; } = [];
+
+    [Parameter]
+    public bool Normalized { get; set; }
+
+    private IReadOnlyList<ChartSeries> _series = [];
+    private IReadOnlyList<HitRegion> _hitRegions = [];
+    private ChartHoverIndex _hoverIndex = new([], [], false);
+    private ChartHoverSelection? _hover;
+    private long _minTicks;
+    private long _maxTicks;
+    private double _minY;
+    private double _maxY;
+    private bool _pointerInside;
+    private bool _hasKeyboardFocus;
+
+    private IReadOnlyList<ChartSeries> Series => _series;
+
+    private double _hoverCardPercent =>
+        _hover is null
+            ? 0
+            : ScaleX(_hover.Timestamp.Ticks) / 1000d * 100d;
+
+    private string KeyboardValueText =>
+        (_hover?.Timestamp ?? _hoverIndex.Timestamps.LastOrDefault())
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    protected override void OnParametersSet()
+    {
+        _hoverIndex = new ChartHoverIndex(Histories, Matches, Normalized);
+        _hover = null;
+        _series = BuildSeries();
+        if (_series.Count == 0)
+        {
+            return;
+        }
+
+        var points = _series.SelectMany(series => series.Points).ToArray();
+        _minTicks = points.Min(point => point.Timestamp.Ticks);
+        _maxTicks = points.Max(point => point.Timestamp.Ticks);
+        if (_maxTicks == _minTicks)
+        {
+            _maxTicks += TimeSpan.TicksPerDay;
+        }
+
+        var rawMin = points.Min(point => point.Value);
+        var rawMax = points.Max(point => point.Value);
+        var padding = rawMax == rawMin
+            ? Math.Max(Math.Abs(rawMin) * .05, .05)
+            : (rawMax - rawMin) * .08;
+        _minY = rawMin - padding;
+        _maxY = rawMax + padding;
+        _hitRegions = BuildHitRegions();
+    }
+
+    private IReadOnlyList<ChartSeries> BuildSeries()
+    {
+        if (!Normalized)
+        {
+            return Histories
+                .Select(history => new ChartSeries(
+                    history,
+                    history.Observations
+                        .Select(observation => new ChartPoint(
+                            observation.Timestamp,
+                            observation.Value))
+                        .ToArray()))
+                .Where(series => series.Points.Count > 0)
+                .ToArray();
+        }
+
+        if (Histories.Count == 0)
+        {
+            return [];
+        }
+
+        var baselineId = Histories[0].Run.Id;
+        return Histories
+            .Select(history => new ChartSeries(
+                history,
+                Matches
+                    .Where(match => match.Observations[baselineId].Value != 0)
+                    .Select(match =>
+                    {
+                        var observation = match.Observations[history.Run.Id];
+                        var baseline = match.Observations[baselineId];
+                        return new ChartPoint(
+                            observation.Timestamp,
+                            observation.Value / baseline.Value);
+                    }).ToArray()))
+            .Where(series => series.Points.Count > 0)
+            .ToArray();
+    }
+
+    private long MinTicks => _minTicks;
+
+    private long MaxTicks => _maxTicks;
+
+    private double MinY => _minY;
+
+    private double MaxY => _maxY;
+
+    private double ScaleX(long ticks) =>
+        PlotLeft + (ticks - MinTicks) / (double)(MaxTicks - MinTicks) * PlotWidth;
+
+    private double ScaleY(double value) =>
+        PlotTop + (MaxY - value) / (MaxY - MinY) * PlotHeight;
+
+    private string Polyline(IReadOnlyList<ChartPoint> points) =>
+        string.Join(
+            " ",
+            points.Select(point => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Value):0.##}")));
+
+    private static IEnumerable<ChartPoint> SamplePoints(IReadOnlyList<ChartPoint> points)
+    {
+        var step = Math.Max(1, (int)Math.Ceiling(points.Count / 100d));
+        for (var index = 0; index < points.Count; index += step)
+        {
+            yield return points[index];
+        }
+
+        if (points.Count > 1 && (points.Count - 1) % step != 0)
+        {
+            yield return points[^1];
+        }
+    }
+
+    private IReadOnlyList<HitRegion> BuildHitRegions()
+    {
+        if (_hoverIndex.Timestamps.Count == 0)
+        {
+            return [];
+        }
+
+        var centers = _hoverIndex.Timestamps
+            .Select(timestamp => ScaleX(timestamp.Ticks))
+            .ToArray();
+        var regions = new HitRegion[centers.Length];
+        for (var index = 0; index < centers.Length; index++)
+        {
+            var left = index == 0
+                ? PlotLeft
+                : (centers[index - 1] + centers[index]) / 2d;
+            var right = index == centers.Length - 1
+                ? PlotLeft + PlotWidth
+                : (centers[index] + centers[index + 1]) / 2d;
+            regions[index] = new HitRegion(index, left, Math.Max(.25, right - left));
+        }
+
+        return regions;
+    }
+
+    private void SelectTimeline(int timelineIndex)
+    {
+        _pointerInside = true;
+        _hover = _hoverIndex.SelectAt(timelineIndex);
+    }
+
+    private void OnChartPointerLeave()
+    {
+        _pointerInside = false;
+        if (!_hasKeyboardFocus)
+        {
+            _hover = null;
+        }
+    }
+
+    private void OnScrubberFocus()
+    {
+        _hasKeyboardFocus = true;
+        _hover ??= _hoverIndex.SelectAt(_hoverIndex.Timestamps.Count - 1);
+    }
+
+    private void OnScrubberBlur()
+    {
+        _hasKeyboardFocus = false;
+        if (!_pointerInside)
+        {
+            _hover = null;
+        }
+    }
+
+    private void OnScrubberInput(ChangeEventArgs eventArgs)
+    {
+        if (_hoverIndex.Timestamps.Count == 0
+            || !int.TryParse(
+                eventArgs.Value?.ToString(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var timelineIndex))
+        {
+            return;
+        }
+
+        _hover = _hoverIndex.SelectAt(timelineIndex);
+    }
+
+    private string FormatAxisValue(double value) =>
+        Normalized
+            ? value.ToString("0.000×", CultureInfo.InvariantCulture)
+            : value.ToString(Math.Abs(value) >= 100 ? "N0" : "0.###", CultureInfo.InvariantCulture);
+
+    private static string FormatDate(long ticks) =>
+        new DateTime(ticks, DateTimeKind.Unspecified).ToString("MMM d\nyyyy", CultureInfo.InvariantCulture);
+
+    private static string ShortSha(string sha) => sha.Length <= 10 ? sha : sha[..10];
+
+    private static string FormatValue(double value) =>
+        value.ToString(Math.Abs(value) >= 100 ? "N2" : "0.####", CultureInfo.InvariantCulture);
+
+    private static string FormatError(double? error) =>
+        error is null ? string.Empty : $" ± {FormatValue(error.Value)}";
+
+    private sealed record ChartPoint(DateTime Timestamp, double Value);
+
+    private sealed record HitRegion(int TimelineIndex, double X, double Width);
+
+    private sealed record ChartSeries(
+        BenchmarkHistory History,
+        IReadOnlyList<ChartPoint> Points);
+}
