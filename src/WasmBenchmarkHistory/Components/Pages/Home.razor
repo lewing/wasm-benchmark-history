@@ -216,7 +216,14 @@ else
                                         {
                                             <span> ± @FormatValue(observation.Error.Value)</span>
                                         }
-                                        <small>@((observation.Value / baseline.Value).ToString("0.000×", CultureInfo.InvariantCulture))</small>
+                                        @if (baseline.Value == 0)
+                                        {
+                                            <small title="Ratio is undefined because the baseline is zero">—</small>
+                                        }
+                                        else
+                                        {
+                                            <small>@((observation.Value / baseline.Value).ToString("0.000×", CultureInfo.InvariantCulture))</small>
+                                        }
                                     </td>
                                 }
                             </tr>

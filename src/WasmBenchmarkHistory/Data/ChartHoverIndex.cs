@@ -40,7 +40,8 @@ public sealed class ChartHoverIndex
             .ThenBy(match => match.Key.RuntimeSha, StringComparer.Ordinal)
             .ThenBy(match => match.Key.PerformanceSha, StringComparer.Ordinal)
             .GroupBy(match => match.Key.Timestamp)
-            .ToDictionary(group => group.Key, group => group.First());
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single());
 
         Timestamps = (normalized
                 ? _matchesByTimestamp.Values

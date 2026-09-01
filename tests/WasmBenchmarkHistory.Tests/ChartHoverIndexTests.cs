@@ -113,6 +113,30 @@ public sealed class ChartHoverIndexTests
         Assert.Empty(new ChartHoverIndex(histories, matches, normalized: true).Timestamps);
     }
 
+    [Fact]
+    public void DuplicateStrictMatchesAtSameTimestamp_AreNotCollapsed()
+    {
+        var timestamp = new DateTime(2026, 9, 1, 10, 0, 0);
+        var mono = History(
+            KnownRunConfigurations.All[0],
+            Observation(KnownRunConfigurations.All[0], timestamp, 10, "runtime-a", "performance-a"),
+            Observation(KnownRunConfigurations.All[0], timestamp, 11, "runtime-b", "performance-b"));
+        var aot = History(
+            KnownRunConfigurations.All[1],
+            Observation(KnownRunConfigurations.All[1], timestamp, 5, "runtime-a", "performance-a"),
+            Observation(KnownRunConfigurations.All[1], timestamp, 5.5, "runtime-b", "performance-b"));
+        var histories = new[] { mono, aot };
+        var matches = ObservationMatcher.MatchStrict(histories);
+
+        Assert.Equal(2, matches.Count);
+        var rawIndex = new ChartHoverIndex(histories, matches, normalized: false);
+        var selection = Assert.IsType<ChartHoverSelection>(rawIndex.SelectAt(0));
+
+        Assert.False(selection.HasStrictComparison);
+        Assert.All(selection.Points, point => Assert.Null(point.StrictRatio));
+        Assert.Empty(new ChartHoverIndex(histories, matches, normalized: true).Timestamps);
+    }
+
     private static BenchmarkObservation Observation(
         RunConfiguration run,
         DateTime timestamp,
