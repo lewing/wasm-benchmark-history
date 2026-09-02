@@ -349,6 +349,27 @@
     margin-top: 1rem;
 }
 
+.state-banner {
+    align-items: center;
+    background: rgb(249 213 110 / 8%);
+    border: 1px solid rgb(249 213 110 / 28%);
+    border-radius: .8rem;
+    color: #f9d56e;
+    display: flex;
+    gap: .65rem;
+    margin-top: 1rem;
+    padding: .8rem 1rem;
+}
+
+.state-banner strong,
+.state-banner span {
+    font-size: .72rem;
+}
+
+.state-banner span {
+    color: var(--muted);
+}
+
 .error-banner strong {
     color: #ff929a;
 }
