@@ -17,6 +17,66 @@
     font-size: .8rem;
 }
 
+.chart-toolbar {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: .8rem 1.2rem;
+}
+
+.chart-toolbar fieldset {
+    align-items: center;
+    border: 0;
+    display: flex;
+    gap: .25rem;
+    margin: 0;
+    padding: 0;
+}
+
+.chart-toolbar legend {
+    color: var(--muted);
+    float: left;
+    font-size: .62rem;
+    margin-right: .5rem;
+}
+
+.chart-toolbar button,
+.pin-actions button,
+.close-card {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: .4rem;
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: .62rem;
+    padding: .32rem .5rem;
+}
+
+.chart-toolbar button:hover,
+.chart-toolbar button.active {
+    background: rgb(100 225 255 / 11%);
+    border-color: rgb(100 225 255 / 42%);
+    color: var(--accent);
+}
+
+.chart-toolbar button:disabled {
+    cursor: not-allowed;
+    opacity: .4;
+}
+
+.chart-toolbar .reset-range {
+    margin-left: .3rem;
+}
+
+.zoom-help {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .6rem;
+}
+
 .legend {
     display: flex;
     flex-wrap: wrap;
@@ -61,6 +121,7 @@ svg {
     display: block;
     height: clamp(340px, 42vw, 540px);
     overflow: visible;
+    touch-action: pan-y;
     width: 100%;
 }
 
@@ -113,6 +174,19 @@ svg {
     pointer-events: all;
 }
 
+.zoom-selection {
+    fill: rgb(100 225 255 / 16%);
+    opacity: 0;
+    pointer-events: none;
+    stroke: var(--accent);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+.zoom-selection.active {
+    opacity: 1;
+}
+
 .keyboard-scrubber {
     clip: rect(0 0 0 0);
     clip-path: inset(50%);
@@ -146,6 +220,41 @@ svg {
     stroke-width: 2;
 }
 
+.pin-line {
+    pointer-events: none;
+    stroke-dasharray: 2 4;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+}
+
+.pin-line.pin-a {
+    stroke: #f9d56e;
+}
+
+.pin-line.pin-b {
+    stroke: #ff8fa3;
+}
+
+.pin-badge.pin-a {
+    fill: #f9d56e;
+}
+
+.pin-badge.pin-b {
+    fill: #ff8fa3;
+}
+
+.pin-badge,
+.pin-label {
+    pointer-events: none;
+}
+
+.pin-label {
+    fill: #071120;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 900;
+}
+
 .hover-card {
     background: rgb(7 17 32 / 96%);
     border: 1px solid rgb(139 159 190 / 36%);
@@ -154,7 +263,7 @@ svg {
     max-width: min(430px, calc(100% - 1.5rem));
     min-width: 330px;
     padding: .8rem;
-    pointer-events: none;
+    pointer-events: auto;
     position: absolute;
     top: .65rem;
     transform: translateX(12px);
@@ -171,6 +280,17 @@ svg {
     display: flex;
     justify-content: space-between;
     padding: .1rem .15rem .65rem;
+}
+
+.close-card {
+    align-items: center;
+    border-radius: 50%;
+    display: flex;
+    font-size: .9rem;
+    height: 1.6rem;
+    justify-content: center;
+    padding: 0;
+    width: 1.6rem;
 }
 
 .hover-card header div > span,
@@ -295,6 +415,35 @@ code {
     font-family: var(--mono);
 }
 
+.pin-actions {
+    display: flex;
+    gap: .4rem;
+    margin-top: .65rem;
+}
+
+.pin-actions button {
+    flex: 1;
+}
+
+.pin-actions .pin-a {
+    border-color: rgb(249 213 110 / 45%);
+    color: #f9d56e;
+}
+
+.pin-actions .pin-b {
+    border-color: rgb(255 143 163 / 45%);
+    color: #ff8fa3;
+}
+
+.pin-actions button:hover:not(:disabled) {
+    background: rgb(255 255 255 / 7%);
+}
+
+.pin-actions button:disabled {
+    cursor: default;
+    opacity: .55;
+}
+
 .chart-caption {
     border-top: 1px solid var(--line);
     color: var(--muted);
@@ -305,6 +454,15 @@ code {
 }
 
 @media (max-width: 620px) {
+    .chart-toolbar {
+        align-items: start;
+        flex-direction: column;
+    }
+
+    .chart-toolbar fieldset {
+        flex-wrap: wrap;
+    }
+
     .hover-card,
     .hover-card.flip {
         left: .75rem !important;
