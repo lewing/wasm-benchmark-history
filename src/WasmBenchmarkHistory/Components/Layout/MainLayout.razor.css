@@ -1,6 +1,8 @@
 .site-header {
     align-items: center;
     display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
     justify-content: space-between;
     margin: 0 auto;
     max-width: 1440px;
@@ -44,13 +46,15 @@
     margin-top: .1rem;
 }
 
-.source-link {
+.source-link,
+.comparison-link {
     color: var(--muted);
     font-size: .82rem;
     text-decoration: none;
 }
 
-.source-link:hover {
+.source-link:hover,
+.comparison-link:hover {
     color: var(--ink);
 }
 

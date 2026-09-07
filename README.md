@@ -20,6 +20,182 @@ first selected run. Hover the chart to inspect the nearest timestamp, or focus
 it and use the left/right arrow, Home, and End keys. The detail card reports
 each run's value, build identities, trace name, and strict ratio when available.
 
+## Four-runtime same-build comparison
+
+Open **Four-runtime comparison** (`/compare-builds`) to compare imported results
+for Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R. This view
+does not depend on public historical indexes having a ReadyToRun lane. It keeps
+official same-build measurements separate from earlier one-iteration ColdStart
+experiments and leaves the historical chart's strict matching unchanged.
+
+The coverage table accounts for the union of benchmark identities. The six
+pairwise geometric means all use the **same four-way common set**, excluding
+missing, invalid, and duplicate identities. Identity is the exact BDN namespace,
+type, method, and parameter string, never the BDN job ID or display name.
+Parameter strings are not heuristically rewritten. Multiple reports for an
+identity are flagged as duplicates, even if their means agree; no arbitrary
+winner is selected. Records without a structured identity are counted as
+unidentified, not guessed from `FullName`. BDN's valid `Namespace: null` means
+the global namespace and is normalized to an empty string; a missing namespace
+property is still rejected.
+
+**Speedup = baseline mean / candidate mean**: above 1 means the candidate is
+faster. Aggregates use the exponential of the average log difference, with
+equal weight per benchmark/parameter combination. Choose a category to compute
+the same comparison within that category. BDN categories are used when present;
+otherwise categories are benchmark namespaces. Search, pagination, and the
+coverage filter provide individual comparisons, with means in nanoseconds per
+operation, standard deviation, standard error, and retained statistics sample
+count. Category tags can overlap; their counts are not additive. Source
+partitions and report names remain inspectable.
+
+Only finite positive means with positive integer `Statistics.N` qualify.
+Non-finite or negative variance statistics are invalid; absent variance remains
+explicitly unavailable. BDN errors or critical validation failures exclude
+affected report/benchmark entries even when statistics exist. Raw error messages
+are not exported. Upload status does not determine measurement validity:
+an upload-only failed partition can contain usable complete BDN reports.
+Different machines, measurement counts, and benchmark variability limit the
+interpretation of a single build. These descriptive speedups are not statistical
+significance claims.
+
+### Included snapshot: build 3068640
+
+`DataSets/3068640.json.gz` contains build `20260907.2` from September 7, 2026:
+all **60/60 benchmark partitions**, 11,100 full BDN reports, and 22,261 benchmark
+entries. Their total measurement-record count is 1,449,717 (including warmup and
+overhead stages, not just retained result samples). Of 5,685 identities in the
+union, **5,237** have valid results in all four modes. There are no duplicates
+or unidentified entries. R2R Partition1's 357 benchmark entries were recovered
+despite its post-execution upload failure.
+
+| Runtime | Valid | Invalid | Absent from lane |
+|---|---:|---:|---:|
+| Mono interpreter | 5,682 | 1 | 2 |
+| Mono AOT | 5,288 | 2 | 395 |
+| CoreCLR interpreter | 5,621 | 23 | 41 |
+| CoreCLR R2R | 5,630 | 14 | 41 |
+
+All 40 invalid entries have null Statistics; passed Helix partitions are not
+equivalent to complete benchmark usability. The full JSON exporter has no error
+or validation-error fields in this build, so the snapshot does not certify the
+absence of console warnings.
+
+| Baseline | Candidate | Common-set speedup |
+|---|---|---:|
+| Mono interpreter | Mono AOT | 3.488183x |
+| Mono interpreter | CoreCLR interpreter | 0.041691x |
+| Mono interpreter | CoreCLR R2R | 0.181274x |
+| Mono AOT | CoreCLR interpreter | 0.011952x |
+| Mono AOT | CoreCLR R2R | 0.051968x |
+| CoreCLR interpreter | CoreCLR R2R | 4.348044x |
+
+All six use exactly the same 5,237 cases, not per-pair intersections. The target
+runtime build source is `2120018b13c80b3bfff680dcfa93bc2e668664cc`; the performance
+source is `2d66af36f374db948edc29264dfe95829fa183bc`. V8 is `15.2.124`.
+The target runtime package is `11.0.0-ci`, distinct from the host SDK
+`11.0.100-rc.1.26431.109`. Lane configuration defines interpreter/AOT/R2R mode:
+BDN target descriptions can misleadingly call interpreters "Wasm AOT".
+Workload manifest `11.0.100-manifests.01db7193` is recorded; a distinct workload
+source SHA is unavailable. Build provenance is not independent verification of
+source hashes embedded in the target binaries.
+
+Each partition's BDN host report identifies Ubuntu 22.04.5 LTS, x64,
+AMD EPYC 9124, 16 physical cores / 32 logical cores. This matches hardware/OS
+class, not host identity or identical execution conditions. Retained statistics
+sample counts range from 12 to 20 in every lane. The usual exported settings
+are overhead evaluation enabled, 250 ms iteration time, 15 minimum / 20 maximum
+iterations, and one warmup. Some cases export `IterationCount=6` and
+`WarmupCount=-1` (39 entries in each Mono lane, 33 in each CoreCLR lane);
+per-benchmark settings preserve these exceptions rather than substituting a
+uniform configuration.
+
+### Import a build
+
+The application includes a reusable local BenchmarkDotNet importer:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --import-build /absolute/private-cache/manifest.json \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/BUILD_ID.json.gz
+```
+
+The importer reads full BDN JSON reports (`Benchmarks` with structured identity
+and `Statistics`), prints coverage and six speedups, and writes a compressed
+allowlisted snapshot. `DataSets/*.json.gz` ship with build/publish output and
+populate the build selector. Raw logs and acquisition caches must stay outside
+the repository.
+
+The manifest shape is:
+
+```json
+{
+  "build": {
+    "buildId": "BUILD_ID",
+    "buildNumber": "BUILD_NUMBER",
+    "runtimeSha": "FULL_40_CHARACTER_RUNTIME_SHA",
+    "performanceSha": "FULL_40_CHARACTER_PERFORMANCE_SHA",
+    "sourceDate": "YYYY-MM-DD"
+  },
+  "lanes": [
+    {
+      "provenance": {
+        "id": "mono-interpreter",
+        "displayName": "Mono interpreter",
+        "helixJobId": "HELIX_JOB_GUID",
+        "build": { "...": "repeat the exact build object above" },
+        "runtimeVersion": "runtime version",
+        "v8Version": "V8 version",
+        "workloadVersion": "workload version",
+        "configuration": "measurement/job configuration",
+        "expectedPartitions": 15,
+        "hostSdkVersion": "host SDK version (not the target runtime)",
+        "installerSdkSha": "installer/SDK SHA (not the runtime SHA)",
+        "benchmarkDotNetVersion": "BenchmarkDotNet version",
+        "measurementConfiguration": "public-safe iteration/warmup configuration"
+      },
+      "partitions": [
+        {
+          "name": "Partition1",
+          "status": "passed",
+          "note": "",
+          "reports": ["mono-interpreter/Partition1/Example-report-full.json"]
+        }
+      ]
+    }
+  ],
+  "caveats": ["Public-safe hardware and measurement comparability notes."]
+}
+```
+
+Supply all four lane IDs: `mono-interpreter`, `mono-aot`,
+`coreclr-interpreter`, `coreclr-r2r`. Every lane must declare identical build
+provenance (including both full SHAs). Report paths are relative to and must
+remain inside the manifest directory. Enumerate every acquired partition;
+missing partitions remain visible against `expectedPartitions`, and partitions
+without reports must carry an explanatory note. Empty or incompatible report
+schemas fail the import rather than returning success-shaped measurements.
+Use absolute command-line paths because `dotnet run --project` starts the
+application in the project directory. The output directory must already exist.
+The four environment fields after `expectedPartitions` are optional; the UI
+explicitly reports unavailable values. Numeric variance, original retained
+sample values, and total measurement-record counts (including non-result
+stages) are preserved when present, in addition to the displayed statistics.
+An allowlist extracts numeric/enum measurement settings from BDN `DisplayInfo`
+when the exporter omits a `Job` object; arbitrary job labels, paths, and
+benchmark parameter text are not copied into this configuration field.
+
+Provenance in BDN alone cannot prove source build identity: the acquisition
+manifest must be assembled from the actual build's lane/job/partition inventory,
+not by combining unrelated report directories. Review manifest strings before
+importing. The exporter **constructs a new measurement schema**, rather than
+copying arbitrary report fields or stripping a few sensitive keys. It does not
+retain `HostEnvironmentInfo`, full job objects, logs, URLs, tokens, SAS queries,
+machine names, accounts, or filesystem paths. Only sanitized measurements,
+report basenames, and explicitly curated public-safe provenance belong in
+checked-in snapshots. Internal data acquisition requires authorized access;
+running the app does not.
+
 ## Architecture
 
 - `Components/Pages/Home.razor` owns the catalog/search/comparison workflow.
@@ -33,6 +209,11 @@ each run's value, build identities, trace name, and strict ratio when available.
   SHA, and performance-repository SHA. There is no timestamp-only fallback.
 - `Data/CachedPageClient.cs` and `DiskPageCache.cs` provide bounded-refresh
   local caching with stale-cache fallback during network failures.
+- `Data/BuildSnapshotImporter.cs` allowlists BDN statistics and identity into
+  compressed same-build snapshots; `BuildComparison.cs` accounts for coverage
+  and calculates strict common-set speedups.
+- `Components/Pages/CompareBuilds.razor` presents the four-runtime snapshot
+  comparison independently of the historical data source.
 
 ## Data safety and errors
 

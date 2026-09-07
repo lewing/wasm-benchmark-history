@@ -1,0 +1,277 @@
+@page "/compare-builds"
+@inject BuildSnapshotStore Store
+
+<PageTitle>Four-runtime WASM comparison</PageTitle>
+
+<section class="intro">
+    <p class="eyebrow">SAME-BUILD MEASUREMENTS</p>
+    <h1>Four WASM runtime modes</h1>
+    <p>Compare Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R.
+        These imported snapshots are separate from <a href="/">historical trends</a>;
+        no earlier ColdStart runs are mixed in.</p>
+</section>
+
+<label for="build-select">Build</label>
+<select id="build-select" value="@_buildId" @onchange="ChangeBuildAsync">
+    @foreach (var id in _buildIds)
+    {
+        <option value="@id">@id</option>
+    }
+</select>
+
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else if (_result is null)
+{
+    <p role="status">@(_buildIds.Length == 0 ? "No build snapshots are installed." : "Loading snapshot...")</p>
+}
+else
+{
+    var snapshot = _result.Snapshot;
+    <section class="notice">
+        <strong>Descriptive comparison, not a significance claim.</strong>
+        <p>One build, different machines and measurement counts. Means are nanoseconds per operation;
+            lower is better. Speedup = baseline mean / candidate mean; above 1 means the candidate is faster.
+            Every aggregate uses the same valid four-runtime intersection, with equal weight per benchmark
+            and parameter combination. Missing, invalid, or duplicate identities are never replaced with zero.</p>
+        @foreach (var caveat in snapshot.Caveats)
+        {
+            <p>@caveat</p>
+        }
+    </section>
+
+    <section>
+        <h2>Coverage</h2>
+        <p><strong>@_result.Common.Length.ToString("N0")</strong> valid four-runtime matches
+            out of <strong>@_result.Rows.Length.ToString("N0")</strong> identities in the union.
+            Missing is relative to that union; invalid and duplicate counts are identities, not samples.
+            Unidentified records cannot be joined and are listed separately.</p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Runtime</th><th>Partitions</th><th>Entries</th><th>Valid</th><th>Missing</th><th>Invalid</th><th>Duplicate</th><th>Unidentified</th></tr></thead>
+                <tbody>
+                    @foreach (var coverage in _result.Coverage)
+                    {
+                        <tr>
+                            <th>@LaneName(coverage.LaneId)</th>
+                            <td>@coverage.Partitions / @coverage.ExpectedPartitions</td>
+                            <td>@coverage.Entries</td><td>@coverage.Valid</td><td>@coverage.Missing</td>
+                            <td>@coverage.Invalid</td><td>@coverage.Duplicates</td><td>@coverage.Unidentified</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section>
+        <h2>Pairwise geometric mean speedups</h2>
+        <p>The category selector applies to the aggregate and individual tables. Search and coverage filters
+            below only affect individual rows. Categories use BDN tags when available, otherwise the benchmark namespace.
+            Tags can overlap, so category counts are not additive.</p>
+        <label for="category">Category</label>
+        <select id="category" @bind="_category" @bind:after="ResetPage">
+            <option value="">All categories</option>
+            @foreach (var category in Categories)
+            {
+                <option value="@category">@category</option>
+            }
+        </select>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Baseline</th><th>Candidate</th><th>Four-way matches</th><th>Speedup</th></tr></thead>
+                <tbody>
+                    @foreach (var pair in BuildComparison.Summarize(CategoryRows))
+                    {
+                        <tr><td>@LaneName(pair.BaselineId)</td><td>@LaneName(pair.CandidateId)</td>
+                            <td>@pair.Count</td><td>@FormatRatio(pair.GeometricMean)</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section>
+        <h2>Individual benchmarks</h2>
+        <div class="controls">
+            <label>Search <input type="search" @bind="_search" @bind:event="oninput" @bind:after="ResetPage" placeholder="Namespace, method, parameters" /></label>
+            <label>Rows <select @bind="_rowFilter" @bind:after="ResetPage">
+                <option value="all">All coverage</option><option value="common">Four-way matches</option>
+                <option value="excluded">Excluded from aggregates</option>
+            </select></label>
+            <label>Speedup baseline <select @bind="_baseline">
+                @foreach (var lane in snapshot.Lanes)
+                {
+                    <option value="@lane.Provenance.Id">@lane.Provenance.DisplayName</option>
+                }
+            </select></label>
+        </div>
+        <p>Mean, standard deviation (SD), standard error (SE), retained statistics sample count (N).
+            Individual speedups appear only for valid four-way matches. Expand a benchmark for source details.</p>
+        <div class="table-wrap">
+            <table class="measurements">
+                <thead><tr><th>Benchmark and parameters</th>
+                    @foreach (var id in BuildComparison.LaneIds)
+                    {
+                        <th>@LaneName(id)</th>
+                    }
+                </tr></thead>
+                <tbody>
+                    @foreach (var row in FilteredRows.Skip(_page * PageSize).Take(PageSize))
+                    {
+                        <tr>
+                            <th><details><summary>@row.Identity.DisplayName</summary>
+                                <p>@string.Join(", ", RowCategories(row))</p>
+                                @foreach (var id in BuildComparison.LaneIds)
+                                {
+                                    @foreach (var measurement in row.Cells[id].Measurements)
+                                    {
+                                        <p>@LaneName(id): @measurement.Partition / @measurement.Report
+                                            @measurement.InvalidReason</p>
+                                        <p>Measurement records (all stages): @(measurement.MeasurementCount?.ToString() ?? "unavailable").
+                                            Retained samples: @(measurement.Statistics.N?.ToString() ?? "unavailable").
+                                            Median @Number(measurement.Statistics.Median) ns;
+                                            min @Number(measurement.Statistics.Min) ns; max @Number(measurement.Statistics.Max) ns.</p>
+                                        <p>Measurement settings: @(measurement.MeasurementConfiguration ?? "unavailable")</p>
+                                    }
+                                }
+                            </details></th>
+                            @foreach (var id in BuildComparison.LaneIds)
+                            {
+                                var cell = row.Cells[id];
+                                <td>
+                                    @if (cell.ValidMeasurement is { } measurement)
+                                    {
+                                        var stats = measurement.Statistics;
+                                        <strong>@Number(stats.Mean) ns</strong>
+                                        <small>SD @Number(stats.StandardDeviation); SE @Number(stats.StandardError); N @stats.N</small>
+                                        @if (row.IsCommon)
+                                        {
+                                            <small class="ratio">@FormatRatio(row.Cells[_baseline].ValidMeasurement!.Statistics.Mean / stats.Mean)</small>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <strong class="excluded">@cell.Status</strong>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <button @onclick="PreviousPage" disabled="@(_page == 0)">Previous</button>
+            <span>Page @(_page + 1) of @Math.Max(1, (FilteredRows.Length + PageSize - 1) / PageSize)
+                (@FilteredRows.Length.ToString("N0") rows)</span>
+            <button @onclick="NextPage" disabled="@((_page + 1) * PageSize >= FilteredRows.Length)">Next</button>
+        </div>
+    </section>
+
+    <section>
+        <h2>Build and partition provenance</h2>
+        <p>Build @snapshot.Build.BuildId (@snapshot.Build.BuildNumber), @snapshot.Build.SourceDate</p>
+        <p>Runtime <code>@snapshot.Build.RuntimeSha</code><br />
+            Performance <code>@snapshot.Build.PerformanceSha</code></p>
+        @foreach (var lane in snapshot.Lanes)
+        {
+            <details class="provenance">
+                <summary>@lane.Provenance.DisplayName</summary>
+                <p>Helix job <code>@lane.Provenance.HelixJobId</code></p>
+                <p>Target runtime package: @lane.Provenance.RuntimeVersion<br />V8: @lane.Provenance.V8Version<br />
+                    Workload: @lane.Provenance.WorkloadVersion<br />Configuration: @lane.Provenance.Configuration</p>
+                <p>Host SDK (not target runtime): @(lane.Provenance.HostSdkVersion ?? "unavailable")<br />
+                    Installer/SDK source (not runtime source): <code>@(lane.Provenance.InstallerSdkSha ?? "unavailable")</code><br />
+                    BenchmarkDotNet: @(lane.Provenance.BenchmarkDotNetVersion ?? "unavailable")<br />
+                    Measurement configuration: @(lane.Provenance.MeasurementConfiguration ?? "unavailable")</p>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Partition</th><th>Status</th><th>Reports / entries / unidentified</th><th>Notes</th></tr></thead>
+                    <tbody>
+                        @foreach (var partition in lane.Partitions)
+                        {
+                            <tr><td>@partition.Name</td><td>@partition.Status</td>
+                                <td>@partition.Reports / @partition.Measurements / @partition.Unidentified</td><td>@partition.Note</td></tr>
+                        }
+                    </tbody>
+                </table></div>
+            </details>
+        }
+    </section>
+}
+
+@code {
+    private const int PageSize = 50;
+    private string[] _buildIds = [];
+    private string _buildId = "";
+    private BuildComparisonResult? _result;
+    private string? _error;
+    private string _category = "";
+    private string _search = "";
+    private string _rowFilter = "all";
+    private string _baseline = BuildComparison.LaneIds[0];
+    private int _page;
+    private long _loadVersion;
+
+    private string LaneName(string id) =>
+        _result!.Snapshot.Lanes.Single(lane => lane.Provenance.Id == id).Provenance.DisplayName;
+
+    private static string[] RowCategories(BuildComparisonRow row) =>
+        row.Categories.Length > 0 ? row.Categories :
+        [row.Identity.Namespace.Length > 0 ? row.Identity.Namespace : "(global namespace)"];
+
+    private string[] Categories => _result!.Rows.SelectMany(RowCategories)
+        .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    private IEnumerable<BuildComparisonRow> CategoryRows => _result!.Rows
+        .Where(row => _category.Length == 0 || RowCategories(row).Contains(_category, StringComparer.Ordinal));
+    private BuildComparisonRow[] FilteredRows => CategoryRows.Where(row =>
+        row.Identity.DisplayName.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) &&
+        (_rowFilter == "all" || (_rowFilter == "common" ? row.IsCommon : !row.IsCommon))).ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _buildIds = Store.GetBuildIds();
+        if (_buildIds.Length > 0)
+        {
+            _buildId = _buildIds[0];
+            await LoadAsync();
+        }
+    }
+
+    private async Task ChangeBuildAsync(ChangeEventArgs args)
+    {
+        _buildId = args.Value?.ToString() ?? "";
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var version = ++_loadVersion;
+        _result = null;
+        _error = null;
+        _category = "";
+        ResetPage();
+        try
+        {
+            var snapshot = await Store.LoadAsync(_buildId);
+            if (version == _loadVersion)
+                _result = BuildComparison.Analyze(snapshot);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            if (version == _loadVersion)
+                _error = $"Could not load build snapshot: {exception.Message}";
+        }
+    }
+
+    private void ResetPage() => _page = 0;
+    private void PreviousPage() => _page--;
+    private void NextPage() => _page++;
+    private static string Number(double? value) =>
+        value?.ToString("N2", CultureInfo.InvariantCulture) ?? "unavailable";
+    private static string FormatRatio(double? value) =>
+        value is { } number && double.IsFinite(number)
+            ? number.ToString("0.000'x'", CultureInfo.InvariantCulture) : "unavailable";
+}
