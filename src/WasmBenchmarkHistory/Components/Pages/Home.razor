@@ -50,21 +50,63 @@ else
                        autocomplete="off" />
             </div>
 
-            @if (SearchResults.Count > 0)
+            <div class="tree-heading">
+                <span>@(HasTreeFilter ? "Matching categories" : "Browse by category")</span>
+                <small>@TreeBenchmarkCount.ToString("N0") benchmarks</small>
+            </div>
+
+            @if (TreeItems.Count > 0)
             {
-                <div class="search-results">
-                    @foreach (var entry in SearchResults)
-                    {
-                        <button type="button" @onclick="() => SelectBenchmark(entry)">
-                            <span class="result-name">@entry.Benchmark</span>
-                            <span class="availability @(entry.IsShared ? "shared" : "partial")">
-                                @(entry.IsShared ? "3/3 shared" : $"{entry.Pages.Count}/3 runs")
-                            </span>
-                        </button>
-                    }
+                <div class="benchmark-tree" role="tree" aria-label="Microbenchmarks grouped by category">
+                    <Virtualize TItem="BenchmarkTreeItem" Items="TreeItems" Context="item" ItemSize="39">
+                        @if (item.Entry is null)
+                        {
+                            @if (HasTreeFilter)
+                            {
+                                <div class="tree-category filtered"
+                                     role="treeitem"
+                                     aria-expanded="true"
+                                     style="--tree-depth:@item.Depth">
+                                    <span class="tree-chevron" aria-hidden="true">⌄</span>
+                                    <strong>@item.Label</strong>
+                                    <small>@item.Count.ToString("N0")</small>
+                                </div>
+                            }
+                            else
+                            {
+                                <button class="tree-category"
+                                        type="button"
+                                        role="treeitem"
+                                        aria-expanded="@IsCategoryExpanded(item.Path)"
+                                        style="--tree-depth:@item.Depth"
+                                        @onclick="() => ToggleCategory(item.Path)">
+                                    <span class="tree-chevron" aria-hidden="true">
+                                        @(IsCategoryExpanded(item.Path) ? "⌄" : "›")
+                                    </span>
+                                    <strong>@item.Label</strong>
+                                    <small>@item.Count.ToString("N0")</small>
+                                </button>
+                            }
+                        }
+                        else
+                        {
+                            <button class="tree-benchmark @(ReferenceEquals(item.Entry, _selectedBenchmark) ? "selected" : null)"
+                                    type="button"
+                                    role="treeitem"
+                                    aria-selected="@(ReferenceEquals(item.Entry, _selectedBenchmark))"
+                                    title="@item.Entry.Benchmark"
+                                    style="--tree-depth:@item.Depth"
+                                    @onclick="() => SelectBenchmark(item.Entry)">
+                                <span class="result-name">@GetBenchmarkLabel(item)</span>
+                                <span class="availability @(item.Entry.IsShared ? "shared" : "partial")">
+                                    @(item.Entry.IsShared ? "3/3" : $"{item.Entry.Pages.Count}/3")
+                                </span>
+                            </button>
+                        }
+                    </Virtualize>
                 </div>
             }
-            else if (!string.IsNullOrWhiteSpace(_searchText) && _selectedBenchmark is null)
+            else if (HasTreeFilter && _selectedBenchmark is null)
             {
                 <p class="empty-search">No benchmark in the loaded indexes matches this search.</p>
             }
@@ -249,22 +291,38 @@ else
     private bool _normalized;
     private long _loadVersion;
     private CancellationTokenSource? _loadCancellation;
+    private readonly HashSet<string> _expandedCategories = new(StringComparer.OrdinalIgnoreCase);
     private int _catalogTotal;
     private int _sharedTotal;
     private IReadOnlyDictionary<string, int> _runTotals =
         new Dictionary<string, int>(StringComparer.Ordinal);
 
-    private IReadOnlyList<BenchmarkCatalogEntry> SearchResults =>
-        _catalog is null || string.IsNullOrWhiteSpace(_searchText) || _selectedBenchmark is not null
-            ? []
-            : _catalog.Entries
-                .Where(entry => entry.Benchmark.Contains(
-                    _searchText.Trim(),
-                    StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(entry => entry.IsShared)
-                .ThenBy(entry => entry.Benchmark.Length)
-                .Take(12)
-                .ToArray();
+    private bool HasTreeFilter => !string.IsNullOrWhiteSpace(_searchText);
+
+    private ICollection<BenchmarkTreeItem> TreeItems
+    {
+        get
+        {
+            if (_catalog is null)
+            {
+                return [];
+            }
+
+            var filter = _searchText.Trim();
+            var items = new List<BenchmarkTreeItem>();
+            foreach (var node in _catalog.CategoryTree)
+            {
+                AppendTreeItems(node, items, filter, ancestorMatches: false, depth: 0);
+            }
+
+            return items;
+        }
+    }
+
+    private int TreeBenchmarkCount =>
+        !HasTreeFilter
+            ? _catalogTotal
+            : TreeItems.Count(item => item.Entry is not null);
 
     private bool CanLoad =>
         _selectedBenchmark is not null
@@ -334,6 +392,81 @@ else
         _histories = [];
         _matches = [];
     }
+
+    private void ToggleCategory(string category)
+    {
+        if (!_expandedCategories.Remove(category))
+        {
+            _expandedCategories.Add(category);
+        }
+    }
+
+    private bool IsCategoryExpanded(string category) =>
+        _expandedCategories.Contains(category);
+
+    private bool AppendTreeItems(
+        BenchmarkCatalogNode node,
+        List<BenchmarkTreeItem> items,
+        string filter,
+        bool ancestorMatches,
+        int depth)
+    {
+        if (filter.Length == 0)
+        {
+            items.Add(new BenchmarkTreeItem(node, depth));
+            if (!_expandedCategories.Contains(node.Path))
+            {
+                return true;
+            }
+
+            foreach (var child in node.Children)
+            {
+                AppendTreeItems(
+                    child,
+                    items,
+                    filter,
+                    ancestorMatches: false,
+                    depth: depth + 1);
+            }
+
+            items.AddRange(node.Entries.Select(entry => new BenchmarkTreeItem(node, entry, depth)));
+            return true;
+        }
+
+        var nodeMatches = ancestorMatches
+            || node.Path.Contains(filter, StringComparison.OrdinalIgnoreCase);
+        var descendants = new List<BenchmarkTreeItem>();
+        foreach (var child in node.Children)
+        {
+            AppendTreeItems(
+                child,
+                descendants,
+                filter,
+                ancestorMatches: nodeMatches,
+                depth: depth + 1);
+        }
+
+        var entries = nodeMatches
+            ? node.Entries
+            : node.Entries
+                .Where(entry => entry.Benchmark.Contains(
+                    filter,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        descendants.AddRange(entries.Select(entry => new BenchmarkTreeItem(node, entry, depth)));
+
+        if (descendants.Count == 0)
+        {
+            return false;
+        }
+
+        items.Add(new BenchmarkTreeItem(node, depth, CountBenchmarks(descendants)));
+        items.AddRange(descendants);
+        return true;
+    }
+
+    private static int CountBenchmarks(IEnumerable<BenchmarkTreeItem> items) =>
+        items.Count(item => item.Entry is not null);
 
     private async Task LoadHistoriesAsync()
     {
@@ -408,4 +541,47 @@ else
 
     private static string FormatValue(double value) =>
         value.ToString(value >= 100 ? "N2" : "N4", CultureInfo.InvariantCulture);
+
+    private static string GetBenchmarkLabel(BenchmarkTreeItem item)
+    {
+        var benchmark = item.Entry!.Benchmark;
+        var prefixLength = item.Path.Length + 1;
+        return benchmark.Length > prefixLength
+            && benchmark.StartsWith(item.Path, StringComparison.OrdinalIgnoreCase)
+            && benchmark[item.Path.Length] == '.'
+                ? benchmark[prefixLength..]
+                : benchmark;
+    }
+
+    private sealed record BenchmarkTreeItem
+    {
+        public BenchmarkTreeItem(BenchmarkCatalogNode node, int depth, int? count = null)
+        {
+            Label = node.Name;
+            Path = node.Path;
+            Count = count ?? node.BenchmarkCount;
+            Depth = depth;
+        }
+
+        public BenchmarkTreeItem(
+            BenchmarkCatalogNode node,
+            BenchmarkCatalogEntry entry,
+            int depth)
+        {
+            Label = node.Name;
+            Path = node.Path;
+            Entry = entry;
+            Depth = depth;
+        }
+
+        public string Label { get; }
+
+        public string Path { get; }
+
+        public BenchmarkCatalogEntry? Entry { get; }
+
+        public int Count { get; }
+
+        public int Depth { get; }
+    }
 }
