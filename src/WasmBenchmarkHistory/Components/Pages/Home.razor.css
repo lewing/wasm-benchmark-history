@@ -97,7 +97,7 @@
     border-radius: 1.1rem;
     display: grid;
     grid-template-columns: minmax(280px, 1.25fr) minmax(280px, 1fr) minmax(250px, .75fr);
-    min-height: 315px;
+    min-height: 480px;
 }
 
 .search-area,
@@ -154,36 +154,80 @@
     color: #71809b;
 }
 
-.search-results {
+.tree-heading {
+    align-items: center;
+    color: var(--muted);
+    display: flex;
+    font-size: .68rem;
+    justify-content: space-between;
+    margin: 1rem .15rem .45rem;
+    text-transform: uppercase;
+}
+
+.tree-heading small {
+    color: #71809b;
+    font-size: .62rem;
+}
+
+.benchmark-tree {
     background: #0b1527;
     border: 1px solid var(--line-strong);
     border-radius: .65rem;
-    box-shadow: 0 14px 40px rgb(0 0 0 / 35%);
-    margin-top: .4rem;
-    max-height: 310px;
+    height: 330px;
     overflow: auto;
-    position: absolute;
-    width: min(520px, calc(100vw - 3rem));
-    z-index: 5;
 }
 
-.search-results button {
+.tree-category,
+.tree-benchmark {
     align-items: center;
     background: transparent;
     border: 0;
     border-bottom: 1px solid var(--line);
     color: var(--ink);
-    cursor: pointer;
     display: flex;
     font: inherit;
-    gap: .8rem;
-    justify-content: space-between;
-    padding: .75rem .9rem;
+    height: 39px;
     text-align: left;
     width: 100%;
 }
 
-.search-results button:hover {
+.tree-category {
+    cursor: pointer;
+    gap: .55rem;
+    padding: 0 .8rem 0 calc(.8rem + var(--tree-depth) * .9rem);
+}
+
+.tree-category.filtered {
+    cursor: default;
+}
+
+.tree-category strong {
+    flex: 1;
+    font-size: .72rem;
+}
+
+.tree-category small {
+    color: var(--muted);
+    font-size: .62rem;
+}
+
+.tree-chevron {
+    color: var(--accent);
+    font-size: .9rem;
+    text-align: center;
+    width: .75rem;
+}
+
+.tree-benchmark {
+    cursor: pointer;
+    gap: .8rem;
+    justify-content: space-between;
+    padding: 0 .8rem 0 calc(2.1rem + var(--tree-depth) * .9rem);
+}
+
+.tree-category:hover,
+.tree-benchmark:hover,
+.tree-benchmark.selected {
     background: rgb(100 225 255 / 7%);
 }
 
@@ -191,7 +235,9 @@
     font-family: var(--mono);
     font-size: .72rem;
     overflow: hidden;
+    text-align: left;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .availability {
@@ -214,6 +260,7 @@
 .empty-search {
     color: var(--muted);
     font-size: .78rem;
+    margin: 1rem .15rem;
 }
 
 .run-options {
