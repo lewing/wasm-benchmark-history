@@ -1,0 +1,37 @@
+name: Live data smoke
+
+on:
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-data-smoke
+  cancel-in-progress: true
+
+jobs:
+  published-data:
+    name: Published data remains parseable
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      RUN_LIVE_SMOKE: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 11.0.x
+          dotnet-quality: preview
+
+      - name: Restore
+        run: dotnet restore WasmBenchmarkHistory.slnx --nologo
+
+      - name: Run read-only live smoke test
+        run: dotnet test tests/WasmBenchmarkHistory.Tests/WasmBenchmarkHistory.Tests.csproj --configuration Release --no-restore --nologo --filter "Category=Live"

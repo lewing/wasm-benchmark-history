@@ -1,5 +1,8 @@
 # WASM benchmark history
 
+[![CI](https://github.com/lewing/wasm-benchmark-history/actions/workflows/ci.yml/badge.svg)](https://github.com/lewing/wasm-benchmark-history/actions/workflows/ci.yml)
+[![Live data smoke](https://github.com/lewing/wasm-benchmark-history/actions/workflows/live-smoke.yml/badge.svg)](https://github.com/lewing/wasm-benchmark-history/actions/workflows/live-smoke.yml)
+
 A narrowly scoped, server-hosted Blazor app for comparing historical .NET WASM
 microbenchmark results published by
 [`dotnet/performance`](https://github.com/dotnet/performance).
@@ -306,4 +309,7 @@ dotnet build WasmBenchmarkHistory.slnx
 ```
 
 The live smoke test is read-only. It loads all three published indexes and one
-shared benchmark history from each run configuration.
+shared benchmark history from each run configuration. GitHub Actions runs the
+ordinary restore, Release build, tests, and publish validation for pull requests
+and pushes to `main`. A separate daily/manual workflow runs the network-dependent
+live smoke so upstream availability does not gate ordinary changes.
