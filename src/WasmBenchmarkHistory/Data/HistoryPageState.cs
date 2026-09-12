@@ -10,7 +10,9 @@ public sealed record HistoryPageState(
     string? InvestigationRunId,
     ObservationIdentity? BaselineA,
     ObservationIdentity? ComparisonB,
-    bool UseRobustSummary);
+    bool UseRobustSummary,
+    bool ShowVariabilityBand = false,
+    int VariabilityWindow = RollingVariabilityCalculator.DefaultWindow);
 
 public sealed record HistoryPageStateParseResult(
     HistoryPageState State,
@@ -64,6 +66,12 @@ public static class HistoryPageStateCodec
             investigationRunId,
             warnings);
         var robust = ParseSummary(GetSingle(values, "summary", warnings), warnings);
+        var showVariabilityBand = ParseBand(
+            GetSingle(values, "band", warnings),
+            warnings);
+        var variabilityWindow = ParseBandWindow(
+            GetSingle(values, "bandWindow", warnings),
+            warnings);
 
         return new HistoryPageStateParseResult(
             new HistoryPageState(
@@ -74,7 +82,9 @@ public static class HistoryPageStateCodec
                 investigationRunId,
                 baseline,
                 comparison,
-                robust),
+                robust,
+                showVariabilityBand,
+                variabilityWindow),
             warnings);
     }
 
@@ -99,6 +109,14 @@ public static class HistoryPageStateCodec
         Add(values, "a", FormatPin(state.BaselineA));
         Add(values, "b", FormatPin(state.ComparisonB));
         Add(values, "summary", state.UseRobustSummary ? "robust" : "point");
+        if (state.ShowVariabilityBand)
+        {
+            Add(values, "band", "iqr");
+            Add(
+                values,
+                "bandWindow",
+                state.VariabilityWindow.ToString(CultureInfo.InvariantCulture));
+        }
 
         return values.Count == 0
             ? "/"
@@ -210,6 +228,44 @@ public static class HistoryPageStateCodec
 
         warnings.Add("The shared investigation summary mode is invalid; point mode was used.");
         return false;
+    }
+
+    private static bool ParseBand(string? value, List<string> warnings)
+    {
+        if (value is null or "off")
+        {
+            return false;
+        }
+
+        if (value == "iqr")
+        {
+            return true;
+        }
+
+        warnings.Add("The shared variability band mode is invalid; bands were disabled.");
+        return false;
+    }
+
+    private static int ParseBandWindow(string? value, List<string> warnings)
+    {
+        if (value is null)
+        {
+            return RollingVariabilityCalculator.DefaultWindow;
+        }
+
+        if (int.TryParse(
+                value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var window)
+            && RollingVariabilityCalculator.IsSupportedWindow(window))
+        {
+            return window;
+        }
+
+        warnings.Add(
+            $"The shared variability window is invalid; {RollingVariabilityCalculator.DefaultWindow} observations were used.");
+        return RollingVariabilityCalculator.DefaultWindow;
     }
 
     private static HistoryTimeRange ParseRange(

@@ -1,9 +1,9 @@
-# WASM benchmark history
+# Wasm benchmark history
 
 [![CI](https://github.com/lewing/wasm-benchmark-history/actions/workflows/ci.yml/badge.svg)](https://github.com/lewing/wasm-benchmark-history/actions/workflows/ci.yml)
 [![Live data smoke](https://github.com/lewing/wasm-benchmark-history/actions/workflows/live-smoke.yml/badge.svg)](https://github.com/lewing/wasm-benchmark-history/actions/workflows/live-smoke.yml)
 
-A narrowly scoped, server-hosted Blazor app for comparing historical .NET WASM
+A narrowly scoped, server-hosted Blazor app for comparing historical .NET Wasm
 microbenchmark results published by
 [`dotnet/performance`](https://github.com/dotnet/performance).
 
@@ -37,6 +37,17 @@ Use **30d**, **90d**, **1y**, or **All** to focus the chart, or drag across the
 plot to create a custom zoom range. Open an observation detail card and pin one
 observation from a run as **baseline A**, then another observation from that
 same run as **comparison B**. Pins remain visible while inspecting other points.
+Enable **Variability analysis** to keep the combined linear chart as the
+magnitude overview while adding one aligned small multiple per runtime. Each
+small multiple has its own linear value axis and overlays a descriptive trailing
+median with a Q1–Q3 band. A shared subplot reports relative volatility as
+`100 × IQR / |rolling median|`, making dispersion comparable when runtimes
+differ by orders of magnitude. The selectable 7, 15, and 31-observation windows
+use only primary-series values; the default is 31 observations (roughly one
+week at the current publication cadence).
+To keep Blazor Server interaction responsive, passive hover updates only the
+main chart and detail card. The heavier variability panels synchronize when a
+timestamp is explicitly pinned.
 
 The regression panel always presents the observations older-first, even when A
 and B were selected in reverse. It reports the raw values/errors, absolute and
@@ -50,10 +61,16 @@ pin plus three neighbors on either side). It compares medians and reports the
 interpolated 25th/75th percentiles and IQR with sample counts. It intentionally
 does not claim statistical significance or calculate a p-value.
 
-Benchmark, selected runs, chart mode/range, investigation run, summary method,
-and exact A/B identities are encoded in the query string. Reloading or sharing
-the URL restores valid state; malformed, unavailable, or ambiguous fields are
-ignored with an on-page explanation.
+Rolling variability panels are likewise descriptive context, not a confidence
+interval or significance test. In normalized mode they are calculated from the
+displayed strict-match ratios rather than mixing raw measurement units. Lines
+break across unusually long publication gaps instead of implying continuous
+measurement.
+
+Benchmark, selected runs, chart mode/range, variability-band settings,
+investigation run, summary method, and exact A/B identities are encoded in the
+query string. Reloading or sharing the URL restores valid state; malformed,
+unavailable, or ambiguous fields are ignored with an on-page explanation.
 
 ## Four-runtime same-build comparison
 
@@ -248,6 +265,8 @@ running the app does not.
 - `Data/RegressionInvestigation.cs`, `HistoryTimeRange.cs`, and
   `HistoryPageState.cs` provide exact pin resolution, median/IQR windows,
   validated compare links, range resolution, and safe share-state parsing.
+- `Data/RollingVariabilityCalculator.cs` computes trailing rolling medians and
+  IQR bands locally from primary-series values.
 - `Data/CachedPageClient.cs` and `DiskPageCache.cs` provide bounded-refresh
   local caching with stale-cache fallback during network failures.
 - `Data/BuildSnapshotImporter.cs` allowlists BDN statistics and identity into

@@ -3,11 +3,11 @@
 @inject BenchmarkHistoryService HistoryService
 @inject NavigationManager Navigation
 
-<PageTitle>WASM benchmark history</PageTitle>
+<PageTitle>Wasm benchmark history</PageTitle>
 
 <section class="hero">
     <p class="eyebrow">PUBLIC PERFORMANCE DATA</p>
-    <h1>Compare .NET WASM performance across runtime modes.</h1>
+    <h1>Compare .NET Wasm performance across runtime modes.</h1>
     <p class="lede">
         Explore primary microbenchmark histories from <strong>dotnet/performance</strong>.
         Pages are fetched on demand and comparisons use exact build identities.
@@ -209,6 +209,10 @@ else
                   Normalized="_normalized"
                   TimeRange="_timeRange"
                   TimeRangeChanged="OnTimeRangeChanged"
+                  ShowVariabilityBand="_showVariabilityBand"
+                  ShowVariabilityBandChanged="OnVariabilityBandChanged"
+                  VariabilityWindow="_variabilityWindow"
+                  VariabilityWindowChanged="OnVariabilityWindowChanged"
                   BaselinePin="_investigation.BaselinePin"
                   ComparisonPin="_investigation.ComparisonPin"
                   PinRequested="OnPinRequested" />
@@ -317,6 +321,8 @@ else
     private bool _isLoadingHistories;
     private bool _normalized;
     private HistoryTimeRange _timeRange = HistoryTimeRange.All;
+    private bool _showVariabilityBand;
+    private int _variabilityWindow = RollingVariabilityCalculator.DefaultWindow;
     private readonly InvestigationWorkflowState _investigation = new();
     private bool _useRobustSummary;
     private string? _stateMessage;
@@ -654,6 +660,8 @@ else
 
             _normalized = state.Normalized;
             _timeRange = state.TimeRange;
+            _showVariabilityBand = state.ShowVariabilityBand;
+            _variabilityWindow = state.VariabilityWindow;
             _useRobustSummary = state.UseRobustSummary;
             var investigationRunId = state.InvestigationRunId;
             if (investigationRunId is not null && !_selectedRunIds.Contains(investigationRunId))
@@ -710,6 +718,23 @@ else
             UpdateUrl();
         }
 
+        private void OnVariabilityBandChanged(bool enabled)
+        {
+            _showVariabilityBand = enabled;
+            UpdateUrl();
+        }
+
+        private void OnVariabilityWindowChanged(int window)
+        {
+            if (!RollingVariabilityCalculator.IsSupportedWindow(window))
+            {
+                return;
+            }
+
+            _variabilityWindow = window;
+            UpdateUrl();
+        }
+
         private void OnPinRequested(InvestigationPinRequest request)
         {
             _investigation.Set(request);
@@ -762,7 +787,9 @@ else
                     _investigation.RunId,
                     _investigation.BaselinePin?.Identity,
                     _investigation.ComparisonPin?.Identity,
-                    _useRobustSummary);
+                    _useRobustSummary,
+                    _showVariabilityBand,
+                    _variabilityWindow);
                 target = HistoryPageStateCodec.ToRelativeUri(state);
             }
 

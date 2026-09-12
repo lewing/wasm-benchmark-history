@@ -35,6 +35,38 @@
     padding: 0;
 }
 
+.chart-toolbar .band-controls {
+    gap: .5rem;
+}
+
+.band-controls label {
+    align-items: center;
+    color: var(--muted);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: .62rem;
+    gap: .35rem;
+}
+
+.band-controls input {
+    accent-color: var(--accent);
+}
+
+.band-controls select {
+    background: #0b1527;
+    border: 1px solid var(--line-strong);
+    border-radius: .4rem;
+    color: var(--ink);
+    font: inherit;
+    font-size: .62rem;
+    padding: .3rem .4rem;
+}
+
+.band-controls select:disabled {
+    cursor: not-allowed;
+    opacity: .4;
+}
+
 .chart-toolbar legend {
     color: var(--muted);
     float: left;
@@ -416,6 +448,15 @@ svg {
     font-weight: 750;
 }
 
+.hover-variability {
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: .56rem;
+    gap: .25rem .65rem;
+    margin: .25rem 0 .5rem;
+}
+
 dl {
     display: grid;
     gap: .2rem;
@@ -506,6 +547,11 @@ code {
         flex-wrap: wrap;
     }
 
+    .chart-toolbar .band-controls {
+        align-items: start;
+        flex-direction: column;
+    }
+
     .hover-card,
     .hover-card.flip {
         left: .75rem !important;
@@ -521,4 +567,5 @@ code {
         flex-direction: column;
         gap: .25rem;
     }
+
 }

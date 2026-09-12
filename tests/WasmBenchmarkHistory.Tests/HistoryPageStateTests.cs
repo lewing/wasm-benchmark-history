@@ -17,7 +17,9 @@ public sealed class HistoryPageStateTests
             "mono-wasm",
             new ObservationIdentity(from.AddDays(2), "abcdef1", "1234567"),
             new ObservationIdentity(from.AddDays(20), "abcdef2", "1234568"),
-            true);
+            true,
+            true,
+            31);
 
         var uri = HistoryPageStateCodec.ToRelativeUri(state);
         var result = HistoryPageStateCodec.Parse(uri);
@@ -31,13 +33,15 @@ public sealed class HistoryPageStateTests
         Assert.Equal(state.BaselineA, result.State.BaselineA);
         Assert.Equal(state.ComparisonB, result.State.ComparisonB);
         Assert.Equal(state.UseRobustSummary, result.State.UseRobustSummary);
+        Assert.Equal(state.ShowVariabilityBand, result.State.ShowVariabilityBand);
+        Assert.Equal(state.VariabilityWindow, result.State.VariabilityWindow);
     }
 
     [Fact]
     public void InvalidSharedValuesAreIgnoredWithWarnings()
     {
         var result = HistoryPageStateCodec.Parse(
-            "/?benchmark=&runs=unknown&mode=bad&range=custom&from=nope&to=4&investigate=bad&a=also.bad");
+            "/?benchmark=&runs=unknown&mode=bad&range=custom&from=nope&to=4&investigate=bad&a=also.bad&band=bad&bandWindow=8");
 
         Assert.Null(result.State.Benchmark);
         Assert.Empty(result.State.RunIds);
@@ -45,7 +49,11 @@ public sealed class HistoryPageStateTests
         Assert.Equal(HistoryRangeKind.All, result.State.TimeRange.Kind);
         Assert.Null(result.State.InvestigationRunId);
         Assert.Null(result.State.BaselineA);
-        Assert.True(result.Warnings.Count >= 5);
+        Assert.False(result.State.ShowVariabilityBand);
+        Assert.Equal(
+            RollingVariabilityCalculator.DefaultWindow,
+            result.State.VariabilityWindow);
+        Assert.True(result.Warnings.Count >= 7);
     }
 
     [Fact]
