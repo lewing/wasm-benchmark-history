@@ -65,13 +65,94 @@ public sealed class BenchmarkCatalog
     public BenchmarkCatalog(IEnumerable<BenchmarkCatalogEntry> entries)
     {
         Entries = entries.OrderBy(entry => entry.Benchmark, StringComparer.OrdinalIgnoreCase).ToArray();
+        CategoryTree = BuildCategoryTree(Entries);
         _byName = Entries.ToDictionary(entry => entry.Benchmark, StringComparer.Ordinal);
     }
 
     public IReadOnlyList<BenchmarkCatalogEntry> Entries { get; }
 
+    public IReadOnlyList<BenchmarkCatalogNode> CategoryTree { get; }
+
     public BenchmarkCatalogEntry? Find(string benchmark) =>
         _byName.GetValueOrDefault(benchmark);
+
+    private static IReadOnlyList<BenchmarkCatalogNode> BuildCategoryTree(
+        IReadOnlyList<BenchmarkCatalogEntry> entries)
+    {
+        var roots = new Dictionary<string, MutableBenchmarkCatalogNode>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            var parameterStart = entry.Benchmark.IndexOf('(');
+            var identity = parameterStart > 0
+                ? entry.Benchmark[..parameterStart]
+                : entry.Benchmark;
+            var segments = identity.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            var categorySegments = segments.Length > 1 ? segments[..^1] : segments;
+
+            var siblings = roots;
+            MutableBenchmarkCatalogNode? node = null;
+            var path = string.Empty;
+            foreach (var segment in categorySegments)
+            {
+                path = path.Length == 0 ? segment : $"{path}.{segment}";
+                if (!siblings.TryGetValue(segment, out node))
+                {
+                    node = new MutableBenchmarkCatalogNode(segment, path);
+                    siblings.Add(segment, node);
+                }
+
+                siblings = node.Children;
+            }
+
+            if (node is null)
+            {
+                node = new MutableBenchmarkCatalogNode(identity, identity);
+                roots.Add(identity, node);
+            }
+
+            node.Entries.Add(entry);
+        }
+
+        return roots.Values
+            .OrderBy(node => node.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(Freeze)
+            .ToArray();
+    }
+
+    private static BenchmarkCatalogNode Freeze(MutableBenchmarkCatalogNode node) =>
+        new(
+            node.Name,
+            node.Path,
+            node.Entries
+                .OrderBy(entry => entry.Benchmark, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            node.Children.Values
+                .OrderBy(child => child.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(Freeze)
+                .ToArray());
+
+    private sealed class MutableBenchmarkCatalogNode(string name, string path)
+    {
+        public string Name { get; } = name;
+
+        public string Path { get; } = path;
+
+        public List<BenchmarkCatalogEntry> Entries { get; } = [];
+
+        public Dictionary<string, MutableBenchmarkCatalogNode> Children { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
+    }
+}
+
+public sealed record BenchmarkCatalogNode(
+    string Name,
+    string Path,
+    IReadOnlyList<BenchmarkCatalogEntry> Entries,
+    IReadOnlyList<BenchmarkCatalogNode> Children)
+{
+    public int BenchmarkCount { get; } =
+        Entries.Count + Children.Sum(child => child.BenchmarkCount);
 }
 
 public sealed record BenchmarkObservation(
