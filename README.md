@@ -23,6 +23,10 @@ Hover and keyboard scrubbing are read-only previews. Click or tap a timestamp,
 or press Enter/Space while the chart scrubber is focused, to pin the card and
 reveal A/B actions. A pinned card remains stable while the pointer moves; click
 another timestamp to move it, or press Escape/use its close button to unpin.
+Choosing **Set baseline A** or **Set comparison B** automatically returns the
+chart to selection mode and focuses the keyboard scrubber, so the next point can
+be previewed and pinned immediately. A short status message states which pin is
+still needed.
 
 ### Investigate a temporal regression
 

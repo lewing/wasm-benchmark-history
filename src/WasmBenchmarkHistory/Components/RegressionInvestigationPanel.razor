@@ -240,7 +240,10 @@
 
     protected override void OnParametersSet()
     {
-        _history = Histories.FirstOrDefault(history => history.Run.Id == InvestigationRunId);
+        var effectiveRunId = InvestigationRunId
+            ?? BaselinePin?.RunId
+            ?? ComparisonPin?.RunId;
+        _history = Histories.FirstOrDefault(history => history.Run.Id == effectiveRunId);
         _baselineObservation = _history is null || BaselinePin is null
             ? null
             : RegressionInvestigation.Resolve(_history, BaselinePin);

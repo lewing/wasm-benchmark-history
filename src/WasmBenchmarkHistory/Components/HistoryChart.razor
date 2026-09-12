@@ -251,6 +251,13 @@
             }
         </div>
 
+        @if (InvestigationGuidance is not null)
+        {
+            <div class="investigation-guidance" role="status" aria-live="polite">
+                @InvestigationGuidance
+            </div>
+        }
+
         <div class="chart-caption">
             <span>@(Normalized ? "Ratio to the first selected run on strict matches" : "Raw reported primary-trace values")</span>
             <span id="chart-hover-instructions">
@@ -353,6 +360,18 @@
     private string KeyboardValueText =>
         (_hover?.Timestamp ?? _hoverIndex.Timestamps.LastOrDefault())
             .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private string? InvestigationGuidance =>
+        (BaselinePin, ComparisonPin) switch
+        {
+            (not null, null) =>
+                "Baseline A set — select and pin another timestamp, then choose Set comparison B.",
+            (null, not null) =>
+                "Comparison B set — select and pin another timestamp, then choose Set baseline A.",
+            (not null, not null) =>
+                "Baseline A and comparison B are set — the comparison is shown below. Pin another timestamp to replace either point.",
+            _ => null
+        };
 
     protected override void OnParametersSet()
     {
@@ -694,12 +713,19 @@
 
     private async Task RequestPinAsync(
         InvestigationPinSlot slot,
-        ChartHoverPoint point) =>
+        ChartHoverPoint point)
+    {
         await PinRequested.InvokeAsync(new InvestigationPinRequest(
             slot,
             new InvestigationPin(
                 point.History.Run.Id,
                 ObservationIdentity.From(point.Observation))));
+        _selectionState.Unpin(clearTarget: true);
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        await Task.Yield();
+        await _scrubberElement.FocusAsync(preventScroll: true);
+    }
 
     private async Task ChangeRangeAsync(HistoryTimeRange range)
     {

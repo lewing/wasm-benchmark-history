@@ -209,14 +209,14 @@ else
                   Normalized="_normalized"
                   TimeRange="_timeRange"
                   TimeRangeChanged="OnTimeRangeChanged"
-                  BaselinePin="_baselinePin"
-                  ComparisonPin="_comparisonPin"
+                  BaselinePin="_investigation.BaselinePin"
+                  ComparisonPin="_investigation.ComparisonPin"
                   PinRequested="OnPinRequested" />
 
     <RegressionInvestigationPanel Histories="_histories"
-                                  InvestigationRunId="_investigationRunId"
-                                  BaselinePin="_baselinePin"
-                                  ComparisonPin="_comparisonPin"
+                                  InvestigationRunId="@_investigation.RunId"
+                                  BaselinePin="_investigation.BaselinePin"
+                                  ComparisonPin="_investigation.ComparisonPin"
                                   UseRobustSummary="_useRobustSummary"
                                   UseRobustSummaryChanged="OnRobustSummaryChanged"
                                   PinCleared="ClearPin"
@@ -317,9 +317,7 @@ else
     private bool _isLoadingHistories;
     private bool _normalized;
     private HistoryTimeRange _timeRange = HistoryTimeRange.All;
-    private string? _investigationRunId;
-    private InvestigationPin? _baselinePin;
-    private InvestigationPin? _comparisonPin;
+    private readonly InvestigationWorkflowState _investigation = new();
     private bool _useRobustSummary;
     private string? _stateMessage;
     private long _loadVersion;
@@ -438,7 +436,7 @@ else
 
         _histories = [];
         _matches = [];
-        if (_investigationRunId is not null && !_selectedRunIds.Contains(_investigationRunId))
+        if (_investigation.RunId is not null && !_selectedRunIds.Contains(_investigation.RunId))
         {
             ClearInvestigationState();
         }
@@ -657,23 +655,26 @@ else
             _normalized = state.Normalized;
             _timeRange = state.TimeRange;
             _useRobustSummary = state.UseRobustSummary;
-            _investigationRunId = state.InvestigationRunId;
-            if (_investigationRunId is not null && !_selectedRunIds.Contains(_investigationRunId))
+            var investigationRunId = state.InvestigationRunId;
+            if (investigationRunId is not null && !_selectedRunIds.Contains(investigationRunId))
             {
                 AddStateMessage("The investigation run was not selected and was ignored.");
-                _investigationRunId = null;
+                investigationRunId = null;
             }
 
             await LoadHistoriesAsync(preserveViewState: true, updateUrl: false);
-            if (_histories.Count == 0 || _investigationRunId is null)
+            if (_histories.Count == 0 || investigationRunId is null)
             {
+                _investigation.Clear();
                 UpdateUrl();
                 return;
             }
 
-            var history = _histories.First(history => history.Run.Id == _investigationRunId);
-            _baselinePin = RestorePin(history, state.BaselineA, "baseline A");
-            _comparisonPin = RestorePin(history, state.ComparisonB, "comparison B");
+            var history = _histories.First(history => history.Run.Id == investigationRunId);
+            _investigation.Restore(
+                investigationRunId,
+                RestorePin(history, state.BaselineA, "baseline A"),
+                RestorePin(history, state.ComparisonB, "comparison B"));
             UpdateUrl();
         }
 
@@ -711,44 +712,13 @@ else
 
         private void OnPinRequested(InvestigationPinRequest request)
         {
-            if (!string.Equals(
-                    _investigationRunId,
-                    request.Pin.RunId,
-                    StringComparison.Ordinal))
-            {
-                _investigationRunId = request.Pin.RunId;
-                _baselinePin = null;
-                _comparisonPin = null;
-            }
-
-            if (request.Slot == InvestigationPinSlot.BaselineA)
-            {
-                _baselinePin = request.Pin;
-            }
-            else
-            {
-                _comparisonPin = request.Pin;
-            }
-
+            _investigation.Set(request);
             UpdateUrl();
         }
 
         private void ClearPin(InvestigationPinSlot slot)
         {
-            if (slot == InvestigationPinSlot.BaselineA)
-            {
-                _baselinePin = null;
-            }
-            else
-            {
-                _comparisonPin = null;
-            }
-
-            if (_baselinePin is null && _comparisonPin is null)
-            {
-                _investigationRunId = null;
-            }
-
+            _investigation.Clear(slot);
             UpdateUrl();
         }
 
@@ -766,9 +736,7 @@ else
 
         private void ClearInvestigationState()
         {
-            _investigationRunId = null;
-            _baselinePin = null;
-            _comparisonPin = null;
+            _investigation.Clear();
             _useRobustSummary = false;
         }
 
@@ -791,9 +759,9 @@ else
                     runIds,
                     _normalized,
                     _timeRange,
-                    _investigationRunId,
-                    _baselinePin?.Identity,
-                    _comparisonPin?.Identity,
+                    _investigation.RunId,
+                    _investigation.BaselinePin?.Identity,
+                    _investigation.ComparisonPin?.Identity,
                     _useRobustSummary);
                 target = HistoryPageStateCodec.ToRelativeUri(state);
             }
