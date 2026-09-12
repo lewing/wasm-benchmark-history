@@ -21,10 +21,30 @@
                 Reset
             </button>
         </fieldset>
+        <fieldset class="band-controls">
+            <legend>Variability</legend>
+            <label>
+                <input type="checkbox"
+                       checked="@ShowVariabilityBand"
+                       @onchange="OnVariabilityBandChanged" />
+                Rolling median + IQR
+            </label>
+            <select value="@VariabilityWindow"
+                    disabled="@(!ShowVariabilityBand)"
+                    aria-label="Variability band observation window"
+                    @onchange="OnVariabilityWindowChanged">
+                @foreach (var window in RollingVariabilityCalculator.SupportedWindows)
+                {
+                    <option value="@window">@window observations</option>
+                }
+            </select>
+        </fieldset>
         <span class="zoom-help">
             @(TimeRange.Kind == HistoryRangeKind.Custom
                 ? $"{TimeRange.Start:yyyy-MM-dd} – {TimeRange.End:yyyy-MM-dd}"
-                : "Drag across the plot to zoom")
+                : ShowVariabilityBand
+                    ? $"Trailing {VariabilityWindow}-observation median and IQR; descriptive only"
+                    : "Drag across the plot to zoom")
         </span>
     </div>
 
@@ -76,6 +96,19 @@
                         <svg:text class="axis-label" x="@x" y="@(PlotTop + PlotHeight + 28)" text-anchor="middle">
                             @FormatDate(MinTicks + (long)((MaxTicks - MinTicks) * tick / 4d))
                         </svg:text>
+                    }
+
+                    @if (ShowVariabilityBand)
+                    {
+                        @foreach (var series in Series.Where(series => series.Band.Count > 0))
+                        {
+                            <polygon class="variability-band"
+                                     points="@BandPolygon(series.Band)"
+                                     fill="@series.History.Run.Color" />
+                            <polyline class="variability-median"
+                                      points="@BandMedianPolyline(series.Band)"
+                                      stroke="@series.History.Run.Color" />
+                        }
                     }
 
                     @foreach (var series in Series)
@@ -297,6 +330,19 @@
     public EventCallback<HistoryTimeRange> TimeRangeChanged { get; set; }
 
     [Parameter]
+    public bool ShowVariabilityBand { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> ShowVariabilityBandChanged { get; set; }
+
+    [Parameter]
+    public int VariabilityWindow { get; set; } =
+        RollingVariabilityCalculator.DefaultWindow;
+
+    [Parameter]
+    public EventCallback<int> VariabilityWindowChanged { get; set; }
+
+    [Parameter]
     public InvestigationPin? BaselinePin { get; set; }
 
     [Parameter]
@@ -323,6 +369,8 @@
     private double _maxY;
     private DateTime _availableMinimum;
     private DateTime _availableMaximum;
+    private DateTime _visibleStart;
+    private DateTime _visibleEnd;
     private bool _hasKeyboardFocus;
     private bool _pointerInside;
     private bool _needsDragInitialization;
@@ -393,6 +441,8 @@
         _availableMinimum = allTimestamps.Min();
         _availableMaximum = allTimestamps.Max();
         var visibleRange = TimeRange.Resolve(_availableMinimum, _availableMaximum);
+        _visibleStart = visibleRange.Start;
+        _visibleEnd = visibleRange.End;
         _visibleHistories = Histories
             .Select(history => history with
             {
@@ -533,8 +583,8 @@
     {
         if (!Normalized)
         {
-            return _visibleHistories
-                .Select(history => new ChartSeries(
+            return Histories
+                .Select(history => CreateSeries(
                     history,
                     history.Observations
                         .Select(observation => new ChartPoint(
@@ -551,10 +601,10 @@
         }
 
         var baselineId = _visibleHistories[0].Run.Id;
-        return _visibleHistories
-            .Select(history => new ChartSeries(
+        return Histories
+            .Select(history => CreateSeries(
                 history,
-                _visibleMatches
+                Matches
                     .Where(match => match.Observations[baselineId].Value != 0)
                     .Select(match =>
                     {
@@ -566,6 +616,32 @@
                     }).ToArray()))
             .Where(series => series.Points.Count > 0)
             .ToArray();
+    }
+
+    private ChartSeries CreateSeries(
+        BenchmarkHistory history,
+        IReadOnlyList<ChartPoint> points)
+    {
+        var orderedPoints = points
+            .OrderBy(point => point.Timestamp)
+            .ToArray();
+        var visiblePoints = orderedPoints
+            .Where(point =>
+                point.Timestamp >= _visibleStart
+                && point.Timestamp <= _visibleEnd)
+            .ToArray();
+        IReadOnlyList<VariabilityBandPoint> band = ShowVariabilityBand
+            ? RollingVariabilityCalculator.Calculate(
+                orderedPoints.Select(point => new VariabilitySample(
+                    point.Timestamp,
+                    point.Value)),
+                VariabilityWindow)
+                .Where(point =>
+                    point.Timestamp >= _visibleStart
+                    && point.Timestamp <= _visibleEnd)
+                .ToArray()
+            : [];
+        return new ChartSeries(history, visiblePoints, band);
     }
 
     private long MinTicks => _minTicks;
@@ -591,6 +667,24 @@
             points.Select(point => string.Create(
                 CultureInfo.InvariantCulture,
                 $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Value):0.##}")));
+
+    private string BandPolygon(IReadOnlyList<VariabilityBandPoint> points)
+    {
+        var upper = points.Select(point => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.ThirdQuartile):0.##}"));
+        var lower = points.Reverse().Select(point => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.FirstQuartile):0.##}"));
+        return string.Join(" ", upper.Concat(lower));
+    }
+
+    private string BandMedianPolyline(IReadOnlyList<VariabilityBandPoint> points) =>
+        string.Join(
+            " ",
+            points.Select(point => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Median):0.##}")));
 
     private static IEnumerable<ChartPoint> SamplePoints(IReadOnlyList<ChartPoint> points)
     {
@@ -735,6 +829,24 @@
 
     private Task ResetRangeAsync() => ChangeRangeAsync(HistoryTimeRange.All);
 
+    private Task OnVariabilityBandChanged(ChangeEventArgs eventArgs) =>
+        ShowVariabilityBandChanged.InvokeAsync(eventArgs.Value is true);
+
+    private Task OnVariabilityWindowChanged(ChangeEventArgs eventArgs)
+    {
+        if (int.TryParse(
+                eventArgs.Value?.ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var window)
+            && RollingVariabilityCalculator.IsSupportedWindow(window))
+        {
+            return VariabilityWindowChanged.InvokeAsync(window);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private string FormatAxisValue(double value) =>
         Normalized
             ? value.ToString("0.000×", CultureInfo.InvariantCulture)
@@ -781,7 +893,8 @@
 
     private sealed record ChartSeries(
         BenchmarkHistory History,
-        IReadOnlyList<ChartPoint> Points);
+        IReadOnlyList<ChartPoint> Points,
+        IReadOnlyList<VariabilityBandPoint> Band);
 
     private sealed record PinMarker(
         InvestigationPinSlot Slot,

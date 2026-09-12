@@ -35,6 +35,38 @@
     padding: 0;
 }
 
+.chart-toolbar .band-controls {
+    gap: .5rem;
+}
+
+.band-controls label {
+    align-items: center;
+    color: var(--muted);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: .62rem;
+    gap: .35rem;
+}
+
+.band-controls input {
+    accent-color: var(--accent);
+}
+
+.band-controls select {
+    background: #0b1527;
+    border: 1px solid var(--line-strong);
+    border-radius: .4rem;
+    color: var(--ink);
+    font: inherit;
+    font-size: .62rem;
+    padding: .3rem .4rem;
+}
+
+.band-controls select:disabled {
+    cursor: not-allowed;
+    opacity: .4;
+}
+
 .chart-toolbar legend {
     color: var(--muted);
     float: left;
@@ -159,6 +191,25 @@ svg {
     stroke-linejoin: round;
     stroke-width: 2;
     vector-effect: non-scaling-stroke;
+}
+
+.variability-band,
+.variability-median {
+    pointer-events: none;
+    vector-effect: non-scaling-stroke;
+}
+
+.variability-band {
+    fill-opacity: .12;
+    stroke: none;
+}
+
+.variability-median {
+    fill: none;
+    opacity: .72;
+    stroke-dasharray: 5 4;
+    stroke-linecap: round;
+    stroke-width: 1.25;
 }
 
 .series-point {
@@ -504,6 +555,11 @@ code {
 
     .chart-toolbar fieldset {
         flex-wrap: wrap;
+    }
+
+    .chart-toolbar .band-controls {
+        align-items: start;
+        flex-direction: column;
     }
 
     .hover-card,

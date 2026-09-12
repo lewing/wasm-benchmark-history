@@ -37,6 +37,10 @@ Use **30d**, **90d**, **1y**, or **All** to focus the chart, or drag across the
 plot to create a custom zoom range. Open an observation detail card and pin one
 observation from a run as **baseline A**, then another observation from that
 same run as **comparison B**. Pins remain visible while inspecting other points.
+Enable **Rolling median + IQR** to overlay a descriptive trailing variability
+band for each visible series. The selectable 7, 15, and 31-observation windows
+use only primary-series values; the shaded area spans Q1–Q3 and the dashed line
+is the rolling median. The default is 15 observations.
 
 The regression panel always presents the observations older-first, even when A
 and B were selected in reverse. It reports the raw values/errors, absolute and
@@ -50,10 +54,14 @@ pin plus three neighbors on either side). It compares medians and reports the
 interpolated 25th/75th percentiles and IQR with sample counts. It intentionally
 does not claim statistical significance or calculate a p-value.
 
-Benchmark, selected runs, chart mode/range, investigation run, summary method,
-and exact A/B identities are encoded in the query string. Reloading or sharing
-the URL restores valid state; malformed, unavailable, or ambiguous fields are
-ignored with an on-page explanation.
+Rolling variability bands are likewise descriptive context, not a confidence
+interval or significance test. In normalized mode they are calculated from the
+displayed strict-match ratios rather than mixing raw measurement units.
+
+Benchmark, selected runs, chart mode/range, variability-band settings,
+investigation run, summary method, and exact A/B identities are encoded in the
+query string. Reloading or sharing the URL restores valid state; malformed,
+unavailable, or ambiguous fields are ignored with an on-page explanation.
 
 ## Four-runtime same-build comparison
 
@@ -248,6 +256,8 @@ running the app does not.
 - `Data/RegressionInvestigation.cs`, `HistoryTimeRange.cs`, and
   `HistoryPageState.cs` provide exact pin resolution, median/IQR windows,
   validated compare links, range resolution, and safe share-state parsing.
+- `Data/RollingVariabilityCalculator.cs` computes trailing rolling medians and
+  IQR bands locally from primary-series values.
 - `Data/CachedPageClient.cs` and `DiskPageCache.cs` provide bounded-refresh
   local caching with stale-cache fallback during network failures.
 - `Data/BuildSnapshotImporter.cs` allowlists BDN statistics and identity into
