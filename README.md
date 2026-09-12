@@ -45,6 +45,9 @@ median with a Q1–Q3 band. A shared subplot reports relative volatility as
 differ by orders of magnitude. The selectable 7, 15, and 31-observation windows
 use only primary-series values; the default is 31 observations (roughly one
 week at the current publication cadence).
+To keep Blazor Server interaction responsive, passive hover updates only the
+main chart and detail card. The heavier variability panels synchronize when a
+timestamp is explicitly pinned.
 
 The regression panel always presents the observations older-first, even when A
 and B were selected in reverse. It reports the raw values/errors, absolute and

@@ -305,161 +305,12 @@
 
         @if (ShowVariabilityBand)
         {
-            <section class="variability-analysis" aria-labelledby="variability-analysis-title">
-                <header>
-                    <div>
-                        <strong id="variability-analysis-title">Aligned variability analysis</strong>
-                        <span>
-                            Each runtime keeps a linear value axis; all panels share the history timeline.
-                        </span>
-                    </div>
-                    <small>
-                        Trailing @VariabilityWindow-observation median and Q1–Q3 · descriptive, not a confidence interval
-                    </small>
-                </header>
-
-                <div class="variability-small-multiples">
-                    @foreach (var series in Series)
-                    {
-                        var range = MiniRange(series);
-                        <article>
-                            <header>
-                                <span class="series-swatch" style="background:@series.History.Run.Color"></span>
-                                <strong>@series.History.Run.DisplayName</strong>
-                                <small>@FormatCompact(range.Minimum)–@FormatCompact(range.Maximum)</small>
-                            </header>
-                            <svg viewBox="0 0 1000 145"
-                                 preserveAspectRatio="none"
-                                 role="img"
-                                 aria-label="@series.History.Run.DisplayName rolling median and interquartile range">
-                                <rect class="mini-background"
-                                      x="@MiniPlotLeft"
-                                      y="@MiniPlotTop"
-                                      width="@MiniPlotWidth"
-                                      height="@MiniPlotHeight"
-                                      rx="5" />
-                                @for (var tick = 0; tick <= 2; tick++)
-                                {
-                                    var y = MiniPlotTop + MiniPlotHeight * tick / 2d;
-                                    var value = range.Maximum
-                                        - (range.Maximum - range.Minimum) * tick / 2d;
-                                    <line class="mini-grid"
-                                          x1="@MiniPlotLeft"
-                                          y1="@y"
-                                          x2="@(MiniPlotLeft + MiniPlotWidth)"
-                                          y2="@y" />
-                                    <svg:text class="mini-axis-label"
-                                              x="@(MiniPlotLeft - 10)"
-                                              y="@(y + 4)"
-                                              text-anchor="end">
-                                        @FormatCompact(value)
-                                    </svg:text>
-                                }
-
-                                @foreach (var segment in BandSegments(series.Band))
-                                {
-                                    <polygon class="variability-band"
-                                             points="@MiniBandPolygon(segment, range)"
-                                             fill="@series.History.Run.Color" />
-                                    <polyline class="variability-median"
-                                              points="@MiniBandMedianPolyline(segment, range)"
-                                              stroke="@series.History.Run.Color" />
-                                }
-                                @foreach (var segment in PointSegments(series.Points))
-                                {
-                                    <polyline class="mini-series-line"
-                                              points="@MiniPolyline(segment, range)"
-                                              stroke="@series.History.Run.Color" />
-                                }
-
-                                @{
-                                    var hoverPoint = FindHoverPoint(series.History.Run.Id);
-                                }
-                                @if (hoverPoint is not null)
-                                {
-                                    <line class="mini-crosshair"
-                                          x1="@MiniScaleX(_hover!.Timestamp.Ticks)"
-                                          y1="@MiniPlotTop"
-                                          x2="@MiniScaleX(_hover.Timestamp.Ticks)"
-                                          y2="@(MiniPlotTop + MiniPlotHeight)" />
-                                    <circle class="mini-hover-point"
-                                            cx="@MiniScaleX(hoverPoint.Observation.Timestamp.Ticks)"
-                                            cy="@MiniScaleY(hoverPoint.DisplayValue, range)"
-                                            r="4"
-                                            fill="@series.History.Run.Color" />
-                                }
-                            </svg>
-                        </article>
-                    }
-                </div>
-
-                <article class="volatility-panel">
-                    <header>
-                        <div>
-                            <strong>Relative volatility</strong>
-                            <span>IQR ÷ |rolling median|</span>
-                        </div>
-                        <small>Percentage scale makes dispersion comparable across runtime magnitudes.</small>
-                    </header>
-                    <svg viewBox="0 0 1000 190"
-                         preserveAspectRatio="none"
-                         role="img"
-                         aria-label="Relative rolling interquartile range by runtime">
-                        <rect class="mini-background"
-                              x="@MiniPlotLeft"
-                              y="@MiniPlotTop"
-                              width="@MiniPlotWidth"
-                              height="@VolatilityPlotHeight"
-                              rx="5" />
-                        @for (var tick = 0; tick <= 3; tick++)
-                        {
-                            var y = MiniPlotTop + VolatilityPlotHeight * tick / 3d;
-                            var value = VolatilityMaximum * (3 - tick) / 3d;
-                            <line class="mini-grid"
-                                  x1="@MiniPlotLeft"
-                                  y1="@y"
-                                  x2="@(MiniPlotLeft + MiniPlotWidth)"
-                                  y2="@y" />
-                            <svg:text class="mini-axis-label"
-                                      x="@(MiniPlotLeft - 10)"
-                                      y="@(y + 4)"
-                                      text-anchor="end">
-                                @FormatPercent(value)
-                            </svg:text>
-                        }
-
-                        @foreach (var series in Series)
-                        {
-                            @foreach (var segment in VolatilitySegments(series.Volatility))
-                            {
-                                <polyline class="volatility-line"
-                                          points="@VolatilityPolyline(segment)"
-                                          stroke="@series.History.Run.Color" />
-                            }
-                            var hoverVolatility = FindVolatilityPoint(
-                                series.History.Run.Id,
-                                _hover?.Timestamp);
-                            @if (hoverVolatility is not null)
-                            {
-                                <circle class="mini-hover-point"
-                                        cx="@MiniScaleX(hoverVolatility.Timestamp.Ticks)"
-                                        cy="@VolatilityScaleY(hoverVolatility.RelativeIqr)"
-                                        r="4"
-                                        fill="@series.History.Run.Color" />
-                            }
-                        }
-
-                        @if (_hover is not null)
-                        {
-                            <line class="mini-crosshair"
-                                  x1="@MiniScaleX(_hover.Timestamp.Ticks)"
-                                  y1="@MiniPlotTop"
-                                  x2="@MiniScaleX(_hover.Timestamp.Ticks)"
-                                  y2="@(MiniPlotTop + VolatilityPlotHeight)" />
-                        }
-                    </svg>
-                </article>
-            </section>
+            <VariabilityAnalysisPanels Histories="Histories"
+                                       Matches="Matches"
+                                       Normalized="Normalized"
+                                       TimeRange="TimeRange"
+                                       Window="VariabilityWindow"
+                                       PinnedTimestamp="_selectionState.PinnedTimestamp" />
         }
     }
 </div>
@@ -469,11 +320,6 @@
     private const double PlotTop = 24;
     private const double PlotWidth = 884;
     private const double PlotHeight = 340;
-    private const double MiniPlotLeft = 94;
-    private const double MiniPlotTop = 12;
-    private const double MiniPlotWidth = 876;
-    private const double MiniPlotHeight = 105;
-    private const double VolatilityPlotHeight = 130;
 
     private static readonly IReadOnlyList<RangeOption> RangeOptions =
     [
@@ -589,19 +435,6 @@
                 "Baseline A and comparison B are set — the comparison is shown below. Pin another timestamp to replace either point.",
             _ => null
         };
-
-    private double VolatilityMaximum
-    {
-        get
-        {
-            var maximum = Series
-                .SelectMany(series => series.Volatility)
-                .Select(point => point.RelativeIqr)
-                .DefaultIfEmpty(1)
-                .Max();
-            return Math.Max(1, maximum * 1.08);
-        }
-    }
 
     protected override void OnParametersSet()
     {
@@ -823,14 +656,7 @@
                     && point.Timestamp <= _visibleEnd)
                 .ToArray()
             : [];
-        var volatility = band
-            .Where(point => point.Median != 0)
-            .Select(point => new VolatilityPoint(
-                point.Timestamp,
-                RelativeIqr(point)))
-            .Where(point => double.IsFinite(point.RelativeIqr))
-            .ToArray();
-        return new ChartSeries(history, visiblePoints, band, volatility);
+        return new ChartSeries(history, visiblePoints, band);
     }
 
     private long MinTicks => _minTicks;
@@ -857,116 +683,15 @@
                 CultureInfo.InvariantCulture,
                 $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Value):0.##}")));
 
-    private string BandPolygon(IReadOnlyList<VariabilityBandPoint> points)
-    {
-        var upper = points.Select(point => string.Create(
-            CultureInfo.InvariantCulture,
-            $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.ThirdQuartile):0.##}"));
-        var lower = points.Reverse().Select(point => string.Create(
-            CultureInfo.InvariantCulture,
-            $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.FirstQuartile):0.##}"));
-        return string.Join(" ", upper.Concat(lower));
-    }
-
-    private string BandMedianPolyline(IReadOnlyList<VariabilityBandPoint> points) =>
-        string.Join(
-            " ",
-            points.Select(point => string.Create(
-                CultureInfo.InvariantCulture,
-                $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Median):0.##}")));
-
     private IReadOnlyList<IReadOnlyList<ChartPoint>> PointSegments(
         IReadOnlyList<ChartPoint> points) =>
         TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
-
-    private IReadOnlyList<IReadOnlyList<VariabilityBandPoint>> BandSegments(
-        IReadOnlyList<VariabilityBandPoint> points) =>
-        TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
-
-    private IReadOnlyList<IReadOnlyList<VolatilityPoint>> VolatilitySegments(
-        IReadOnlyList<VolatilityPoint> points) =>
-        TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
-
-    private ValueRange MiniRange(ChartSeries series)
-    {
-        var minimum = series.Points.Min(point => point.Value);
-        var maximum = series.Points.Max(point => point.Value);
-        var padding = maximum == minimum
-            ? Math.Max(Math.Abs(minimum) * .05, .05)
-            : (maximum - minimum) * .08;
-        return new ValueRange(minimum - padding, maximum + padding);
-    }
-
-    private double MiniScaleX(long ticks) =>
-        MiniPlotLeft + (ticks - MinTicks) / (double)(MaxTicks - MinTicks) * MiniPlotWidth;
-
-    private static double MiniScaleY(double value, ValueRange range) =>
-        MiniPlotTop
-        + (range.Maximum - value)
-        / (range.Maximum - range.Minimum)
-        * MiniPlotHeight;
-
-    private double VolatilityScaleY(double value) =>
-        MiniPlotTop
-        + (VolatilityMaximum - value)
-        / VolatilityMaximum
-        * VolatilityPlotHeight;
-
-    private string MiniPolyline(
-        IReadOnlyList<ChartPoint> points,
-        ValueRange range) =>
-        string.Join(
-            " ",
-            points.Select(point => string.Create(
-                CultureInfo.InvariantCulture,
-                $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.Value, range):0.##}")));
-
-    private string MiniBandPolygon(
-        IReadOnlyList<VariabilityBandPoint> points,
-        ValueRange range)
-    {
-        var upper = points.Select(point => string.Create(
-            CultureInfo.InvariantCulture,
-            $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.ThirdQuartile, range):0.##}"));
-        var lower = points.Reverse().Select(point => string.Create(
-            CultureInfo.InvariantCulture,
-            $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.FirstQuartile, range):0.##}"));
-        return string.Join(" ", upper.Concat(lower));
-    }
-
-    private string MiniBandMedianPolyline(
-        IReadOnlyList<VariabilityBandPoint> points,
-        ValueRange range) =>
-        string.Join(
-            " ",
-            points.Select(point => string.Create(
-                CultureInfo.InvariantCulture,
-                $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.Median, range):0.##}")));
-
-    private string VolatilityPolyline(IReadOnlyList<VolatilityPoint> points) =>
-        string.Join(
-            " ",
-            points.Select(point => string.Create(
-                CultureInfo.InvariantCulture,
-                $"{MiniScaleX(point.Timestamp.Ticks):0.##},{VolatilityScaleY(point.RelativeIqr):0.##}")));
-
-    private ChartHoverPoint? FindHoverPoint(string runId) =>
-        _hover?.Points.FirstOrDefault(point => point.History.Run.Id == runId);
 
     private VariabilityBandPoint? FindVariabilityPoint(
         string runId,
         DateTime timestamp) =>
         Series.FirstOrDefault(series => series.History.Run.Id == runId)
             ?.Band.MinBy(point => Math.Abs((point.Timestamp - timestamp).Ticks));
-
-    private VolatilityPoint? FindVolatilityPoint(
-        string runId,
-        DateTime? timestamp) =>
-        timestamp is null
-            ? null
-            : Series.FirstOrDefault(series => series.History.Run.Id == runId)
-                ?.Volatility.MinBy(point =>
-                    Math.Abs((point.Timestamp - timestamp.Value).Ticks));
 
     private static double RelativeIqr(VariabilityBandPoint point) =>
         point.Median == 0
@@ -1150,18 +875,6 @@
     private static string FormatError(double? error) =>
         error is null ? string.Empty : $" ± {FormatValue(error.Value)}";
 
-    private static string FormatCompact(double value)
-    {
-        var absolute = Math.Abs(value);
-        return absolute switch
-        {
-            >= 1_000_000_000 => (value / 1_000_000_000d).ToString("0.##B", CultureInfo.InvariantCulture),
-            >= 1_000_000 => (value / 1_000_000d).ToString("0.##M", CultureInfo.InvariantCulture),
-            >= 1_000 => (value / 1_000d).ToString("0.##K", CultureInfo.InvariantCulture),
-            _ => value.ToString("0.###", CultureInfo.InvariantCulture)
-        };
-    }
-
     private static string FormatPercent(double value) =>
         double.IsFinite(value)
             ? value.ToString("0.##", CultureInfo.InvariantCulture) + "%"
@@ -1198,16 +911,7 @@
     private sealed record ChartSeries(
         BenchmarkHistory History,
         IReadOnlyList<ChartPoint> Points,
-        IReadOnlyList<VariabilityBandPoint> Band,
-        IReadOnlyList<VolatilityPoint> Volatility);
-
-    private sealed record VolatilityPoint(
-        DateTime Timestamp,
-        double RelativeIqr);
-
-    private readonly record struct ValueRange(
-        double Minimum,
-        double Maximum);
+        IReadOnlyList<VariabilityBandPoint> Band);
 
     private sealed record PinMarker(
         InvestigationPinSlot Slot,

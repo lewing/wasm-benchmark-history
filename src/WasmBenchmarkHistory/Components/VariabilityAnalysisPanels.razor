@@ -1,0 +1,464 @@
+@if (_series.Count > 0)
+{
+    <section class="variability-analysis" aria-labelledby="variability-analysis-title">
+        <header>
+            <div>
+                <strong id="variability-analysis-title">Aligned variability analysis</strong>
+                <span>
+                    Each runtime keeps a linear value axis; all panels share the history timeline.
+                </span>
+            </div>
+            <small>
+                Trailing @Window-observation median and Q1–Q3 · descriptive, not a confidence interval
+            </small>
+        </header>
+
+        <div class="variability-small-multiples">
+            @foreach (var series in _series)
+            {
+                var range = MiniRange(series);
+                <article>
+                    <header>
+                        <span class="series-swatch" style="background:@series.History.Run.Color"></span>
+                        <strong>@series.History.Run.DisplayName</strong>
+                        <small>@FormatCompact(range.Minimum)–@FormatCompact(range.Maximum)</small>
+                    </header>
+                    <svg viewBox="0 0 1000 145"
+                         preserveAspectRatio="none"
+                         role="img"
+                         aria-label="@series.History.Run.DisplayName rolling median and interquartile range">
+                        <rect class="mini-background"
+                              x="@MiniPlotLeft"
+                              y="@MiniPlotTop"
+                              width="@MiniPlotWidth"
+                              height="@MiniPlotHeight"
+                              rx="5" />
+                        @for (var tick = 0; tick <= 2; tick++)
+                        {
+                            var y = MiniPlotTop + MiniPlotHeight * tick / 2d;
+                            var value = range.Maximum
+                                - (range.Maximum - range.Minimum) * tick / 2d;
+                            <line class="mini-grid"
+                                  x1="@MiniPlotLeft"
+                                  y1="@y"
+                                  x2="@(MiniPlotLeft + MiniPlotWidth)"
+                                  y2="@y" />
+                            <svg:text class="mini-axis-label"
+                                      x="@(MiniPlotLeft - 10)"
+                                      y="@(y + 4)"
+                                      text-anchor="end">
+                                @FormatCompact(value)
+                            </svg:text>
+                        }
+
+                        @foreach (var segment in BandSegments(series.Band))
+                        {
+                            <polygon class="variability-band"
+                                     points="@MiniBandPolygon(segment, range)"
+                                     fill="@series.History.Run.Color" />
+                            <polyline class="variability-median"
+                                      points="@MiniBandMedianPolyline(segment, range)"
+                                      stroke="@series.History.Run.Color" />
+                        }
+                        @foreach (var segment in PointSegments(series.Points))
+                        {
+                            <polyline class="mini-series-line"
+                                      points="@MiniPolyline(segment, range)"
+                                      stroke="@series.History.Run.Color" />
+                        }
+
+                        @{
+                            var pinnedPoint = FindPinnedPoint(series);
+                        }
+                        @if (pinnedPoint is not null)
+                        {
+                            <line class="mini-crosshair"
+                                  x1="@MiniScaleX(PinnedTimestamp!.Value.Ticks)"
+                                  y1="@MiniPlotTop"
+                                  x2="@MiniScaleX(PinnedTimestamp.Value.Ticks)"
+                                  y2="@(MiniPlotTop + MiniPlotHeight)" />
+                            <circle class="mini-hover-point"
+                                    cx="@MiniScaleX(pinnedPoint.Timestamp.Ticks)"
+                                    cy="@MiniScaleY(pinnedPoint.Value, range)"
+                                    r="4"
+                                    fill="@series.History.Run.Color" />
+                        }
+                    </svg>
+                </article>
+            }
+        </div>
+
+        <article class="volatility-panel">
+            <header>
+                <div>
+                    <strong>Relative volatility</strong>
+                    <span>IQR ÷ |rolling median|</span>
+                </div>
+                <small>Percentage scale makes dispersion comparable across runtime magnitudes.</small>
+            </header>
+            <svg viewBox="0 0 1000 190"
+                 preserveAspectRatio="none"
+                 role="img"
+                 aria-label="Relative rolling interquartile range by runtime">
+                <rect class="mini-background"
+                      x="@MiniPlotLeft"
+                      y="@MiniPlotTop"
+                      width="@MiniPlotWidth"
+                      height="@VolatilityPlotHeight"
+                      rx="5" />
+                @for (var tick = 0; tick <= 3; tick++)
+                {
+                    var y = MiniPlotTop + VolatilityPlotHeight * tick / 3d;
+                    var value = VolatilityMaximum * (3 - tick) / 3d;
+                    <line class="mini-grid"
+                          x1="@MiniPlotLeft"
+                          y1="@y"
+                          x2="@(MiniPlotLeft + MiniPlotWidth)"
+                          y2="@y" />
+                    <svg:text class="mini-axis-label"
+                              x="@(MiniPlotLeft - 10)"
+                              y="@(y + 4)"
+                              text-anchor="end">
+                        @FormatPercent(value)
+                    </svg:text>
+                }
+
+                @foreach (var series in _series)
+                {
+                    @foreach (var segment in VolatilitySegments(series.Volatility))
+                    {
+                        <polyline class="volatility-line"
+                                  points="@VolatilityPolyline(segment)"
+                                  stroke="@series.History.Run.Color" />
+                    }
+                    var pinnedVolatility = FindPinnedVolatility(series);
+                    @if (pinnedVolatility is not null)
+                    {
+                        <circle class="mini-hover-point"
+                                cx="@MiniScaleX(pinnedVolatility.Timestamp.Ticks)"
+                                cy="@VolatilityScaleY(pinnedVolatility.RelativeIqr)"
+                                r="4"
+                                fill="@series.History.Run.Color" />
+                    }
+                }
+
+                @if (PinnedTimestamp is not null && IsVisible(PinnedTimestamp.Value))
+                {
+                    <line class="mini-crosshair"
+                          x1="@MiniScaleX(PinnedTimestamp.Value.Ticks)"
+                          y1="@MiniPlotTop"
+                          x2="@MiniScaleX(PinnedTimestamp.Value.Ticks)"
+                          y2="@(MiniPlotTop + VolatilityPlotHeight)" />
+                }
+            </svg>
+            <p class="variability-sync-note">
+                @(PinnedTimestamp is null
+                    ? "Pin a timestamp in the main chart to synchronize markers without rerendering these panels during passive hover."
+                    : $"Pinned at {PinnedTimestamp:yyyy-MM-dd HH:mm:ss}.")
+            </p>
+        </article>
+    </section>
+}
+
+@code {
+    private const double MiniPlotLeft = 94;
+    private const double MiniPlotTop = 12;
+    private const double MiniPlotWidth = 876;
+    private const double MiniPlotHeight = 105;
+    private const double VolatilityPlotHeight = 130;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<BenchmarkHistory> Histories { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<MatchedComparison> Matches { get; set; } = [];
+
+    [Parameter]
+    public bool Normalized { get; set; }
+
+    [Parameter]
+    public HistoryTimeRange TimeRange { get; set; } = HistoryTimeRange.All;
+
+    [Parameter]
+    public int Window { get; set; } = RollingVariabilityCalculator.DefaultWindow;
+
+    [Parameter]
+    public DateTime? PinnedTimestamp { get; set; }
+
+    private IReadOnlyList<PanelSeries> _series = [];
+    private IReadOnlyList<BenchmarkHistory>? _lastHistories;
+    private IReadOnlyList<MatchedComparison>? _lastMatches;
+    private bool _lastNormalized;
+    private HistoryTimeRange? _lastTimeRange;
+    private int _lastWindow;
+    private DateTime? _lastPinnedTimestamp;
+    private long _minTicks;
+    private long _maxTicks;
+    private bool _shouldRender = true;
+
+    private double VolatilityMaximum
+    {
+        get
+        {
+            var maximum = _series
+                .SelectMany(series => series.Volatility)
+                .Select(point => point.RelativeIqr)
+                .DefaultIfEmpty(1)
+                .Max();
+            return Math.Max(1, maximum * 1.08);
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        var dataChanged =
+            !ReferenceEquals(_lastHistories, Histories)
+            || !ReferenceEquals(_lastMatches, Matches)
+            || _lastNormalized != Normalized
+            || _lastTimeRange != TimeRange
+            || _lastWindow != Window;
+        var pinChanged = _lastPinnedTimestamp != PinnedTimestamp;
+        _shouldRender = _lastHistories is null || dataChanged || pinChanged;
+
+        if (dataChanged)
+        {
+            BuildSeries();
+        }
+
+        _lastHistories = Histories;
+        _lastMatches = Matches;
+        _lastNormalized = Normalized;
+        _lastTimeRange = TimeRange;
+        _lastWindow = Window;
+        _lastPinnedTimestamp = PinnedTimestamp;
+    }
+
+    protected override bool ShouldRender() => _shouldRender;
+
+    private void BuildSeries()
+    {
+        var allTimestamps = Histories
+            .SelectMany(history => history.Observations)
+            .Select(observation => observation.Timestamp)
+            .ToArray();
+        if (allTimestamps.Length == 0)
+        {
+            _series = [];
+            return;
+        }
+
+        var availableMinimum = allTimestamps.Min();
+        var availableMaximum = allTimestamps.Max();
+        var visibleRange = TimeRange.Resolve(availableMinimum, availableMaximum);
+
+        if (!Normalized)
+        {
+            _series = Histories
+                .Select(history => CreateSeries(
+                    history,
+                    history.Observations
+                        .Select(observation => new PanelPoint(
+                            observation.Timestamp,
+                            observation.Value))
+                        .ToArray(),
+                    visibleRange))
+                .Where(series => series.Points.Count > 0)
+                .ToArray();
+            SetTimelineBounds(visibleRange);
+            return;
+        }
+
+        if (Histories.Count == 0)
+        {
+            _series = [];
+            return;
+        }
+
+        var baselineId = Histories[0].Run.Id;
+        _series = Histories
+            .Select(history => CreateSeries(
+                history,
+                Matches
+                    .Where(match => match.Observations[baselineId].Value != 0)
+                    .Select(match =>
+                    {
+                        var observation = match.Observations[history.Run.Id];
+                        var baseline = match.Observations[baselineId];
+                        return new PanelPoint(
+                            observation.Timestamp,
+                            observation.Value / baseline.Value);
+                    })
+                    .ToArray(),
+                visibleRange))
+            .Where(series => series.Points.Count > 0)
+            .ToArray();
+        SetTimelineBounds(visibleRange);
+    }
+
+    private void SetTimelineBounds((DateTime Start, DateTime End) fallbackRange)
+    {
+        var visibleTimestamps = _series
+            .SelectMany(series => series.Points)
+            .Select(point => point.Timestamp.Ticks)
+            .ToArray();
+        _minTicks = visibleTimestamps.Length == 0
+            ? fallbackRange.Start.Ticks
+            : visibleTimestamps.Min();
+        _maxTicks = visibleTimestamps.Length == 0
+            ? fallbackRange.End.Ticks
+            : visibleTimestamps.Max();
+        if (_maxTicks == _minTicks)
+        {
+            _maxTicks += TimeSpan.TicksPerDay;
+        }
+    }
+
+    private PanelSeries CreateSeries(
+        BenchmarkHistory history,
+        IReadOnlyList<PanelPoint> points,
+        (DateTime Start, DateTime End) visibleRange)
+    {
+        var orderedPoints = points.OrderBy(point => point.Timestamp).ToArray();
+        var visiblePoints = orderedPoints
+            .Where(point =>
+                point.Timestamp >= visibleRange.Start
+                && point.Timestamp <= visibleRange.End)
+            .ToArray();
+        var band = RollingVariabilityCalculator.Calculate(
+                orderedPoints.Select(point => new VariabilitySample(
+                    point.Timestamp,
+                    point.Value)),
+                Window)
+            .Where(point =>
+                point.Timestamp >= visibleRange.Start
+                && point.Timestamp <= visibleRange.End)
+            .ToArray();
+        var volatility = band
+            .Where(point => point.Median != 0)
+            .Select(point => new VolatilityPoint(
+                point.Timestamp,
+                100 * point.InterquartileRange / Math.Abs(point.Median)))
+            .Where(point => double.IsFinite(point.RelativeIqr))
+            .ToArray();
+        return new PanelSeries(history, visiblePoints, band, volatility);
+    }
+
+    private ValueRange MiniRange(PanelSeries series)
+    {
+        var minimum = series.Points.Min(point => point.Value);
+        var maximum = series.Points.Max(point => point.Value);
+        var padding = maximum == minimum
+            ? Math.Max(Math.Abs(minimum) * .05, .05)
+            : (maximum - minimum) * .08;
+        return new ValueRange(minimum - padding, maximum + padding);
+    }
+
+    private bool IsVisible(DateTime timestamp) =>
+        timestamp.Ticks >= _minTicks && timestamp.Ticks <= _maxTicks;
+
+    private double MiniScaleX(long ticks) =>
+        MiniPlotLeft + (ticks - _minTicks) / (double)(_maxTicks - _minTicks) * MiniPlotWidth;
+
+    private static double MiniScaleY(double value, ValueRange range) =>
+        MiniPlotTop
+        + (range.Maximum - value)
+        / (range.Maximum - range.Minimum)
+        * MiniPlotHeight;
+
+    private double VolatilityScaleY(double value) =>
+        MiniPlotTop
+        + (VolatilityMaximum - value)
+        / VolatilityMaximum
+        * VolatilityPlotHeight;
+
+    private IReadOnlyList<IReadOnlyList<PanelPoint>> PointSegments(
+        IReadOnlyList<PanelPoint> points) =>
+        TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
+
+    private IReadOnlyList<IReadOnlyList<VariabilityBandPoint>> BandSegments(
+        IReadOnlyList<VariabilityBandPoint> points) =>
+        TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
+
+    private IReadOnlyList<IReadOnlyList<VolatilityPoint>> VolatilitySegments(
+        IReadOnlyList<VolatilityPoint> points) =>
+        TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
+
+    private string MiniPolyline(
+        IReadOnlyList<PanelPoint> points,
+        ValueRange range) =>
+        string.Join(
+            " ",
+            points.Select(point => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.Value, range):0.##}")));
+
+    private string MiniBandPolygon(
+        IReadOnlyList<VariabilityBandPoint> points,
+        ValueRange range)
+    {
+        var upper = points.Select(point => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.ThirdQuartile, range):0.##}"));
+        var lower = points.Reverse().Select(point => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.FirstQuartile, range):0.##}"));
+        return string.Join(" ", upper.Concat(lower));
+    }
+
+    private string MiniBandMedianPolyline(
+        IReadOnlyList<VariabilityBandPoint> points,
+        ValueRange range) =>
+        string.Join(
+            " ",
+            points.Select(point => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.Median, range):0.##}")));
+
+    private string VolatilityPolyline(IReadOnlyList<VolatilityPoint> points) =>
+        string.Join(
+            " ",
+            points.Select(point => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{MiniScaleX(point.Timestamp.Ticks):0.##},{VolatilityScaleY(point.RelativeIqr):0.##}")));
+
+    private PanelPoint? FindPinnedPoint(PanelSeries series) =>
+        PinnedTimestamp is null
+            ? null
+            : series.Points.MinBy(point =>
+                Math.Abs((point.Timestamp - PinnedTimestamp.Value).Ticks));
+
+    private VolatilityPoint? FindPinnedVolatility(PanelSeries series) =>
+        PinnedTimestamp is null
+            ? null
+            : series.Volatility.MinBy(point =>
+                Math.Abs((point.Timestamp - PinnedTimestamp.Value).Ticks));
+
+    private static string FormatCompact(double value)
+    {
+        var absolute = Math.Abs(value);
+        return absolute switch
+        {
+            >= 1_000_000_000 => (value / 1_000_000_000d).ToString("0.##B", CultureInfo.InvariantCulture),
+            >= 1_000_000 => (value / 1_000_000d).ToString("0.##M", CultureInfo.InvariantCulture),
+            >= 1_000 => (value / 1_000d).ToString("0.##K", CultureInfo.InvariantCulture),
+            _ => value.ToString("0.###", CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static string FormatPercent(double value) =>
+        double.IsFinite(value)
+            ? value.ToString("0.##", CultureInfo.InvariantCulture) + "%"
+            : "—";
+
+    private sealed record PanelSeries(
+        BenchmarkHistory History,
+        IReadOnlyList<PanelPoint> Points,
+        IReadOnlyList<VariabilityBandPoint> Band,
+        IReadOnlyList<VolatilityPoint> Volatility);
+
+    private sealed record PanelPoint(DateTime Timestamp, double Value);
+
+    private sealed record VolatilityPoint(DateTime Timestamp, double RelativeIqr);
+
+    private readonly record struct ValueRange(double Minimum, double Maximum);
+}

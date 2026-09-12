@@ -193,25 +193,6 @@ svg {
     vector-effect: non-scaling-stroke;
 }
 
-.variability-band,
-.variability-median {
-    pointer-events: none;
-    vector-effect: non-scaling-stroke;
-}
-
-.variability-band {
-    fill-opacity: .12;
-    stroke: none;
-}
-
-.variability-median {
-    fill: none;
-    opacity: .72;
-    stroke-dasharray: 5 4;
-    stroke-linecap: round;
-    stroke-width: 1.25;
-}
-
 .series-point {
     opacity: .72;
     stroke: #0b1527;
@@ -556,125 +537,6 @@ code {
     padding: .75rem 1.2rem;
 }
 
-.variability-analysis {
-    border-top: 1px solid var(--line);
-    padding: 1rem 1.2rem 1.25rem;
-}
-
-.variability-analysis > header,
-.volatility-panel > header,
-.variability-small-multiples article > header {
-    align-items: center;
-    display: flex;
-    gap: .6rem;
-    justify-content: space-between;
-}
-
-.variability-analysis > header {
-    margin-bottom: .9rem;
-}
-
-.variability-analysis > header div,
-.volatility-panel > header div {
-    display: grid;
-    gap: .18rem;
-}
-
-.variability-analysis header strong {
-    font-size: .72rem;
-}
-
-.variability-analysis header span,
-.variability-analysis header small {
-    color: var(--muted);
-    font-size: .6rem;
-}
-
-.variability-small-multiples {
-    display: grid;
-    gap: .65rem;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.variability-small-multiples article,
-.volatility-panel {
-    background: rgb(3 10 22 / 34%);
-    border: 1px solid var(--line);
-    border-radius: .7rem;
-    min-width: 0;
-    padding: .7rem;
-}
-
-.variability-small-multiples article > header {
-    justify-content: start;
-}
-
-.variability-small-multiples article > header small {
-    margin-left: auto;
-}
-
-.variability-small-multiples svg,
-.volatility-panel svg {
-    display: block;
-    height: 145px;
-    margin-top: .4rem;
-    overflow: hidden;
-    width: 100%;
-}
-
-.volatility-panel {
-    margin-top: .7rem;
-}
-
-.volatility-panel svg {
-    height: 190px;
-}
-
-.mini-background {
-    fill: rgb(3 10 22 / 50%);
-}
-
-.mini-grid {
-    stroke: rgb(139 159 190 / 14%);
-    stroke-width: 1;
-    vector-effect: non-scaling-stroke;
-}
-
-.mini-axis-label {
-    fill: #8492aa;
-    font-family: var(--mono);
-    font-size: 11px;
-}
-
-.mini-series-line,
-.volatility-line {
-    fill: none;
-    opacity: .78;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 1.25;
-    vector-effect: non-scaling-stroke;
-}
-
-.volatility-line {
-    stroke-width: 1.8;
-}
-
-.mini-crosshair {
-    pointer-events: none;
-    stroke: rgb(237 243 255 / 48%);
-    stroke-dasharray: 3 4;
-    stroke-width: 1;
-    vector-effect: non-scaling-stroke;
-}
-
-.mini-hover-point {
-    pointer-events: none;
-    stroke: #edf3ff;
-    stroke-width: 1.5;
-    vector-effect: non-scaling-stroke;
-}
-
 @media (max-width: 620px) {
     .chart-toolbar {
         align-items: start;
@@ -706,13 +568,4 @@ code {
         gap: .25rem;
     }
 
-    .variability-analysis > header,
-    .volatility-panel > header {
-        align-items: start;
-        flex-direction: column;
-    }
-
-    .variability-small-multiples {
-        grid-template-columns: 1fr;
-    }
 }
