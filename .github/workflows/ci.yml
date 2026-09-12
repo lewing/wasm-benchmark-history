@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 11.0.x
+          dotnet-quality: preview
+
+      - name: Restore
+        run: dotnet restore WasmBenchmarkHistory.slnx --nologo
+
+      - name: Build
+        run: dotnet build WasmBenchmarkHistory.slnx --configuration Release --no-restore --nologo
+
+      - name: Test
+        run: dotnet test tests/WasmBenchmarkHistory.Tests/WasmBenchmarkHistory.Tests.csproj --configuration Release --no-build --no-restore --nologo
+
+      - name: Validate publish output
+        run: dotnet publish src/WasmBenchmarkHistory/WasmBenchmarkHistory.csproj --configuration Release --no-build --no-restore --nologo --output artifacts/publish
