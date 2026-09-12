@@ -19,6 +19,38 @@ can show complete raw histories or normalize strict matched observations to the
 first selected run. Hover the chart to inspect the nearest timestamp, or focus
 it and use the left/right arrow, Home, and End keys. The detail card reports
 each run's value, build identities, trace name, and strict ratio when available.
+Hover and keyboard scrubbing are read-only previews. Click or tap a timestamp,
+or press Enter/Space while the chart scrubber is focused, to pin the card and
+reveal A/B actions. A pinned card remains stable while the pointer moves; click
+another timestamp to move it, or press Escape/use its close button to unpin.
+Choosing **Set baseline A** or **Set comparison B** automatically returns the
+chart to selection mode and focuses the keyboard scrubber, so the next point can
+be previewed and pinned immediately. A short status message states which pin is
+still needed.
+
+### Investigate a temporal regression
+
+Use **30d**, **90d**, **1y**, or **All** to focus the chart, or drag across the
+plot to create a custom zoom range. Open an observation detail card and pin one
+observation from a run as **baseline A**, then another observation from that
+same run as **comparison B**. Pins remain visible while inspecting other points.
+
+The regression panel always presents the observations older-first, even when A
+and B were selected in reverse. It reports the raw values/errors, absolute and
+percentage change, ratio, trace/build names, full source identities, and safe
+`dotnet/runtime` / `dotnet/performance` compare links when their SHAs differ.
+A zero older value is reported as an undefined percentage/ratio rather than
+infinity.
+
+The optional robust summary uses up to seven observations around each pin (the
+pin plus three neighbors on either side). It compares medians and reports the
+interpolated 25th/75th percentiles and IQR with sample counts. It intentionally
+does not claim statistical significance or calculate a p-value.
+
+Benchmark, selected runs, chart mode/range, investigation run, summary method,
+and exact A/B identities are encoded in the query string. Reloading or sharing
+the URL restores valid state; malformed, unavailable, or ambiguous fields are
+ignored with an on-page explanation.
 
 ## Four-runtime same-build comparison
 
@@ -200,13 +232,19 @@ running the app does not.
 
 - `Components/Pages/Home.razor` owns the catalog/search/comparison workflow.
 - `Components/HistoryChart.razor` renders a responsive native SVG chart without
-  a charting dependency.
+  a charting dependency. Its collocated JavaScript module keeps drag movement
+  local and sends one completed range to the server.
+- `Components/RegressionInvestigationPanel.razor` keeps within-run temporal
+  analysis visually and semantically separate from strict runtime comparison.
 - `Data/BenchmarkIndexParser.cs` catalogs links from the three small index
   pages. History pages are fetched only after a benchmark is selected.
 - `Data/BenchmarkHistoryParser.cs` extracts the `defaultCounter` primary trace
   from generated JavaScript as text. It never evaluates downloaded JavaScript.
 - `Data/ObservationMatcher.cs` joins observations only on timestamp, runtime
   SHA, and performance-repository SHA. There is no timestamp-only fallback.
+- `Data/RegressionInvestigation.cs`, `HistoryTimeRange.cs`, and
+  `HistoryPageState.cs` provide exact pin resolution, median/IQR windows,
+  validated compare links, range resolution, and safe share-state parsing.
 - `Data/CachedPageClient.cs` and `DiskPageCache.cs` provide bounded-refresh
   local caching with stale-cache fallback during network failures.
 - `Data/BuildSnapshotImporter.cs` allowlists BDN statistics and identity into
@@ -228,6 +266,10 @@ the `defaultCounter` ID, its `trendData[...]` assignment, and the first object
 in that array. A generator change such as computed properties, non-literal
 arrays, a new timestamp format, or renamed fields will produce a schema error
 rather than execute or guess at the data.
+
+The only JavaScript owned by this app is the checked-in chart drag module. It
+operates solely on local pointer coordinates and never receives or evaluates
+content downloaded from benchmark pages.
 
 ## Cache configuration
 
@@ -252,8 +294,10 @@ variables are expanded for configured paths.
 
 ## Tests
 
-Small checked-in HTML fixtures cover encoded benchmark names, primary-trace
-selection, optional errors, alignment failures, and strict SHA matching.
+Small checked-in HTML fixtures and focused unit tests cover encoded benchmark
+names, primary-trace selection, optional errors, strict SHA matching, range
+selection, reverse/zero/duplicate pin cases, median/IQR windows, compare-link
+validation, and query-state round trips and rejection.
 
 ```bash
 dotnet test tests/WasmBenchmarkHistory.Tests --filter 'Category!=Live'

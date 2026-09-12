@@ -1,6 +1,7 @@
 ﻿@page "/"
 @implements IDisposable
 @inject BenchmarkHistoryService HistoryService
+@inject NavigationManager Navigation
 
 <PageTitle>WASM benchmark history</PageTitle>
 
@@ -152,7 +153,7 @@ else
             <button class="primary-button"
                     type="button"
                     disabled="@(!CanLoad)"
-                    @onclick="LoadHistoriesAsync">
+                    @onclick="LoadHistoriesFromUiAsync">
                 @if (_isLoadingHistories)
                 {
                     <span class="button-spinner"></span>
@@ -176,6 +177,14 @@ else
     </div>
 }
 
+@if (_stateMessage is not null)
+{
+    <div class="state-banner" role="status">
+        <strong>Shared state was adjusted.</strong>
+        <span>@_stateMessage</span>
+    </div>
+}
+
 @if (_histories.Count > 0)
 {
     <section class="results-heading">
@@ -188,12 +197,30 @@ else
             </p>
         </div>
         <label class="mode-toggle">
-            <input type="checkbox" @bind="_normalized" />
+            <input type="checkbox"
+                   checked="@_normalized"
+                   @onchange="OnNormalizedChanged" />
             <span>Normalize to @_histories[0].Run.DisplayName</span>
         </label>
     </section>
 
-    <HistoryChart Histories="_histories" Matches="_matches" Normalized="_normalized" />
+    <HistoryChart Histories="_histories"
+                  Matches="_matches"
+                  Normalized="_normalized"
+                  TimeRange="_timeRange"
+                  TimeRangeChanged="OnTimeRangeChanged"
+                  BaselinePin="_investigation.BaselinePin"
+                  ComparisonPin="_investigation.ComparisonPin"
+                  PinRequested="OnPinRequested" />
+
+    <RegressionInvestigationPanel Histories="_histories"
+                                  InvestigationRunId="@_investigation.RunId"
+                                  BaselinePin="_investigation.BaselinePin"
+                                  ComparisonPin="_investigation.ComparisonPin"
+                                  UseRobustSummary="_useRobustSummary"
+                                  UseRobustSummaryChanged="OnRobustSummaryChanged"
+                                  PinCleared="ClearPin"
+                                  ClearAll="ClearInvestigation" />
 
     <section class="comparison-section">
         <div class="section-heading">
@@ -289,11 +316,17 @@ else
     private string? _errorMessage;
     private bool _isLoadingHistories;
     private bool _normalized;
+    private HistoryTimeRange _timeRange = HistoryTimeRange.All;
+    private readonly InvestigationWorkflowState _investigation = new();
+    private bool _useRobustSummary;
+    private string? _stateMessage;
     private long _loadVersion;
     private CancellationTokenSource? _loadCancellation;
     private readonly HashSet<string> _expandedCategories = new(StringComparer.OrdinalIgnoreCase);
     private int _catalogTotal;
     private int _sharedTotal;
+    private bool _isInteractive;
+    private string? _pendingCanonicalUri;
     private IReadOnlyDictionary<string, int> _runTotals =
         new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -334,6 +367,12 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        var sharedState = HistoryPageStateCodec.Parse(Navigation.Uri);
+        if (sharedState.Warnings.Count > 0)
+        {
+            _stateMessage = string.Join(' ', sharedState.Warnings);
+        }
+
         try
         {
             _catalog = await HistoryService.LoadCatalogAsync();
@@ -343,6 +382,7 @@ else
                 run => run.Id,
                 run => _catalog.Entries.Count(entry => entry.Pages.ContainsKey(run.Id)),
                 StringComparer.Ordinal);
+            await RestoreSharedStateAsync(sharedState.State);
         }
         catch (BenchmarkDataException exception)
         {
@@ -361,6 +401,8 @@ else
             _selectedRunIds.Clear();
             _histories = [];
             _matches = [];
+            ClearInvestigationState();
+            UpdateUrl();
         }
     }
 
@@ -379,6 +421,9 @@ else
         _matches = [];
         _errorMessage = null;
         _normalized = false;
+        _timeRange = HistoryTimeRange.All;
+        ClearInvestigationState();
+        UpdateUrl();
     }
 
     private void ToggleRun(string runId)
@@ -391,6 +436,12 @@ else
 
         _histories = [];
         _matches = [];
+        if (_investigation.RunId is not null && !_selectedRunIds.Contains(_investigation.RunId))
+        {
+            ClearInvestigationState();
+        }
+
+        UpdateUrl();
     }
 
     private void ToggleCategory(string category)
@@ -468,7 +519,10 @@ else
     private static int CountBenchmarks(IEnumerable<BenchmarkTreeItem> items) =>
         items.Count(item => item.Entry is not null);
 
-    private async Task LoadHistoriesAsync()
+    private Task LoadHistoriesFromUiAsync() =>
+        LoadHistoriesAsync(preserveViewState: false, updateUrl: true);
+
+    private async Task LoadHistoriesAsync(bool preserveViewState, bool updateUrl)
     {
         if (_catalog is null || _selectedBenchmark is null || !CanLoad)
         {
@@ -483,7 +537,12 @@ else
         _errorMessage = null;
         _histories = [];
         _matches = [];
-        _normalized = false;
+        if (!preserveViewState)
+        {
+            _normalized = false;
+            _timeRange = HistoryTimeRange.All;
+            ClearInvestigationState();
+        }
 
         try
         {
@@ -503,6 +562,11 @@ else
 
             _histories = histories;
             _matches = ObservationMatcher.MatchStrict(histories);
+            NormalizeCustomTimeRange();
+            if (updateUrl)
+            {
+                UpdateUrl();
+            }
         }
         catch (OperationCanceledException) when (loadCancellation.IsCancellationRequested)
         {
@@ -524,6 +588,233 @@ else
             }
         }
     }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _isInteractive = true;
+        if (_pendingCanonicalUri is not null)
+        {
+            NavigateToCanonicalUri(_pendingCanonicalUri);
+            _pendingCanonicalUri = null;
+        }
+    }
+
+    private async Task RestoreSharedStateAsync(HistoryPageState state)
+        {
+            if (_catalog is null)
+            {
+                return;
+            }
+
+            if (state.Benchmark is null)
+            {
+                UpdateUrl();
+                return;
+            }
+
+            var entry = _catalog.Find(state.Benchmark);
+            if (entry is null)
+            {
+                AddStateMessage($"Benchmark '{state.Benchmark}' is not in the current catalog.");
+                UpdateUrl();
+                return;
+            }
+
+            _selectedBenchmark = entry;
+            _searchText = entry.Benchmark;
+            _selectedRunIds.Clear();
+            var requestedRuns = state.RunIds.Count > 0
+                ? KnownRunConfigurations.All.Where(run => state.RunIds.Contains(run.Id))
+                : KnownRunConfigurations.All.Where(run => entry.Pages.ContainsKey(run.Id));
+            foreach (var run in requestedRuns.Where(run => entry.Pages.ContainsKey(run.Id)))
+            {
+                _selectedRunIds.Add(run.Id);
+            }
+
+            if (_selectedRunIds.Count < 2)
+            {
+                AddStateMessage("The shared run selection is not available for this benchmark.");
+                _selectedRunIds.Clear();
+                foreach (var run in KnownRunConfigurations.All.Where(run => entry.Pages.ContainsKey(run.Id)))
+                {
+                    _selectedRunIds.Add(run.Id);
+                }
+            }
+
+            if (_selectedRunIds.Count < 2)
+            {
+                AddStateMessage("This benchmark does not have enough available runs to restore a comparison.");
+                return;
+            }
+
+            _normalized = state.Normalized;
+            _timeRange = state.TimeRange;
+            _useRobustSummary = state.UseRobustSummary;
+            var investigationRunId = state.InvestigationRunId;
+            if (investigationRunId is not null && !_selectedRunIds.Contains(investigationRunId))
+            {
+                AddStateMessage("The investigation run was not selected and was ignored.");
+                investigationRunId = null;
+            }
+
+            await LoadHistoriesAsync(preserveViewState: true, updateUrl: false);
+            if (_histories.Count == 0 || investigationRunId is null)
+            {
+                _investigation.Clear();
+                UpdateUrl();
+                return;
+            }
+
+            var history = _histories.First(history => history.Run.Id == investigationRunId);
+            _investigation.Restore(
+                investigationRunId,
+                RestorePin(history, state.BaselineA, "baseline A"),
+                RestorePin(history, state.ComparisonB, "comparison B"));
+            UpdateUrl();
+        }
+
+        private InvestigationPin? RestorePin(
+            BenchmarkHistory history,
+            ObservationIdentity? identity,
+            string label)
+        {
+            if (identity is null)
+            {
+                return null;
+            }
+
+            var pin = new InvestigationPin(history.Run.Id, identity.Value);
+            if (RegressionInvestigation.Resolve(history, pin) is not null)
+            {
+                return pin;
+            }
+
+            AddStateMessage($"The shared {label} pin is missing or ambiguous and was ignored.");
+            return null;
+        }
+
+        private void OnNormalizedChanged(ChangeEventArgs eventArgs)
+        {
+            _normalized = eventArgs.Value is true;
+            UpdateUrl();
+        }
+
+        private void OnTimeRangeChanged(HistoryTimeRange range)
+        {
+            _timeRange = range;
+            UpdateUrl();
+        }
+
+        private void OnPinRequested(InvestigationPinRequest request)
+        {
+            _investigation.Set(request);
+            UpdateUrl();
+        }
+
+        private void ClearPin(InvestigationPinSlot slot)
+        {
+            _investigation.Clear(slot);
+            UpdateUrl();
+        }
+
+        private void ClearInvestigation()
+        {
+            ClearInvestigationState();
+            UpdateUrl();
+        }
+
+        private void OnRobustSummaryChanged(bool robust)
+        {
+            _useRobustSummary = robust;
+            UpdateUrl();
+        }
+
+        private void ClearInvestigationState()
+        {
+            _investigation.Clear();
+            _useRobustSummary = false;
+        }
+
+        private void AddStateMessage(string message) =>
+            _stateMessage = string.IsNullOrWhiteSpace(_stateMessage)
+                ? message
+                : $"{_stateMessage} {message}";
+
+        private void UpdateUrl()
+        {
+            var target = "/";
+            if (_selectedBenchmark is not null)
+            {
+                var runIds = KnownRunConfigurations.All
+                    .Where(run => _selectedRunIds.Contains(run.Id))
+                    .Select(run => run.Id)
+                    .ToArray();
+                var state = new HistoryPageState(
+                    _selectedBenchmark.Benchmark,
+                    runIds,
+                    _normalized,
+                    _timeRange,
+                    _investigation.RunId,
+                    _investigation.BaselinePin?.Identity,
+                    _investigation.ComparisonPin?.Identity,
+                    _useRobustSummary);
+                target = HistoryPageStateCodec.ToRelativeUri(state);
+            }
+
+            if (!_isInteractive)
+            {
+                _pendingCanonicalUri = target;
+                return;
+            }
+
+            NavigateToCanonicalUri(target);
+        }
+
+        private void NavigateToCanonicalUri(string target)
+        {
+            var absoluteTarget = Navigation.ToAbsoluteUri(target).AbsoluteUri;
+            if (!string.Equals(absoluteTarget, Navigation.Uri, StringComparison.Ordinal))
+            {
+                Navigation.NavigateTo(target, replace: true);
+            }
+        }
+
+        private void NormalizeCustomTimeRange()
+        {
+            if (_timeRange.Kind != HistoryRangeKind.Custom || _histories.Count == 0)
+            {
+                return;
+            }
+
+            var timestamps = _histories
+                .SelectMany(history => history.Observations)
+                .Select(observation => observation.Timestamp)
+                .ToArray();
+            if (timestamps.Length == 0)
+            {
+                _timeRange = HistoryTimeRange.All;
+                AddStateMessage("The shared custom range was ignored because this history has no observations.");
+                return;
+            }
+
+            var minimum = timestamps.Min();
+            var maximum = timestamps.Max();
+            var resolved = _timeRange.Resolve(minimum, maximum);
+            if (resolved.Start == _timeRange.Start && resolved.End == _timeRange.End)
+            {
+                return;
+            }
+
+            _timeRange = resolved == (minimum, maximum)
+                ? HistoryTimeRange.All
+                : HistoryTimeRange.Custom(resolved.Start, resolved.End);
+            AddStateMessage("The shared custom range was outside available history and was adjusted.");
+        }
 
     private void InvalidateCurrentLoad()
     {

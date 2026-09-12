@@ -1,27 +1,58 @@
-@if (Series.Count == 0)
-{
-    <div class="chart-empty">
-        <strong>No strictly matched points are available to normalize.</strong>
-        <span>Switch back to raw values to view the complete histories.</span>
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="chart-shell">
+    <div class="chart-toolbar">
+        <fieldset>
+            <legend>Time range</legend>
+            @foreach (var option in RangeOptions)
+            {
+                <button type="button"
+                        class="@(TimeRange.Kind == option.Range.Kind ? "active" : null)"
+                        aria-pressed="@(TimeRange.Kind == option.Range.Kind)"
+                        @onclick="() => ChangeRangeAsync(option.Range)">
+                    @option.Label
+                </button>
+            }
+            <button type="button"
+                    class="reset-range"
+                    disabled="@(TimeRange.Kind == HistoryRangeKind.All)"
+                    @onclick="ResetRangeAsync">
+                Reset
+            </button>
+        </fieldset>
+        <span class="zoom-help">
+            @(TimeRange.Kind == HistoryRangeKind.Custom
+                ? $"{TimeRange.Start:yyyy-MM-dd} – {TimeRange.End:yyyy-MM-dd}"
+                : "Drag across the plot to zoom")
+        </span>
     </div>
-}
-else
-{
-    <div class="chart-shell">
+
+    @if (Series.Count == 0)
+    {
+        <div class="chart-empty">
+            <strong>@(Normalized ? "No strict matched points in this range." : "No observations in this range.")</strong>
+            <span>Choose a wider time range or reset the chart.</span>
+        </div>
+    }
+    else
+    {
         <div class="legend">
             @foreach (var series in Series)
             {
                 <span>
                     <i style="background:@series.History.Run.Color"></i>
                     <strong>@series.History.Run.DisplayName</strong>
-                    <small>@series.Points.Count.ToString("N0") points</small>
+                    <small>@series.Points.Count.ToString("N0") visible points</small>
                 </span>
             }
         </div>
 
-        <div class="plot-area">
+        <div class="plot-area" @onkeydown="OnPlotKeyDown">
             <div class="svg-wrap">
-                <svg viewBox="0 0 1000 430"
+                <svg @ref="_chartElement"
+                     class="@(_selectionState.IsPinned ? "selection-pinned" : null)"
+                     viewBox="0 0 1000 430"
                      preserveAspectRatio="none"
                      role="img"
                      aria-label="Historical benchmark line chart"
@@ -63,27 +94,53 @@ else
                         }
                     }
 
+                    @foreach (var marker in VisiblePinMarkers)
+                    {
+                        var markerX = ScaleX(marker.Pin.Identity.Timestamp.Ticks);
+                        <line class="pin-line @marker.CssClass"
+                              x1="@markerX"
+                              y1="@PlotTop"
+                              x2="@markerX"
+                              y2="@(PlotTop + PlotHeight)" />
+                        <circle class="pin-badge @marker.CssClass"
+                                cx="@markerX"
+                                cy="@(PlotTop + (marker.Slot == InvestigationPinSlot.BaselineA ? 13 : 34))"
+                                r="11" />
+                        <svg:text class="pin-label"
+                                  x="@markerX"
+                                  y="@(PlotTop + (marker.Slot == InvestigationPinSlot.BaselineA ? 17 : 38))"
+                                  text-anchor="middle">
+                            @(marker.Slot == InvestigationPinSlot.BaselineA ? "A" : "B")
+                        </svg:text>
+                    }
+
                     @if (_hover is not null)
                     {
-                        <line class="hover-crosshair"
+                        <line class="hover-crosshair @(_selectionState.IsPinned ? "pinned" : null)"
                               x1="@ScaleX(_hover.Timestamp.Ticks)"
                               y1="@PlotTop"
                               x2="@ScaleX(_hover.Timestamp.Ticks)"
                               y2="@(PlotTop + PlotHeight)" />
                         @foreach (var point in _hover.Points)
                         {
-                            <circle class="hover-point-halo"
+                            <circle class="hover-point-halo @(_selectionState.IsPinned ? "pinned" : null)"
                                     cx="@ScaleX(point.Observation.Timestamp.Ticks)"
                                     cy="@ScaleY(point.DisplayValue)"
                                     r="8"
                                     fill="@point.History.Run.Color" />
-                            <circle class="hover-point"
+                            <circle class="hover-point @(_selectionState.IsPinned ? "pinned" : null)"
                                     cx="@ScaleX(point.Observation.Timestamp.Ticks)"
                                     cy="@ScaleY(point.DisplayValue)"
                                     r="4.5"
                                     fill="@point.History.Run.Color" />
                         }
                     }
+
+                    <rect class="zoom-selection"
+                          x="@PlotLeft"
+                          y="@PlotTop"
+                          width="0"
+                          height="@PlotHeight" />
 
                     @foreach (var region in _hitRegions)
                     {
@@ -93,13 +150,13 @@ else
                               y="@PlotTop"
                               width="@region.Width"
                               height="@PlotHeight"
-                              @onpointerenter="() => SelectTimeline(region.TimelineIndex)"
-                              @onclick="() => SelectTimeline(region.TimelineIndex)" />
+                              @onpointerenter="() => HoverTimeline(region.TimelineIndex)" />
                     }
                 </svg>
             </div>
 
-            <input class="keyboard-scrubber"
+            <input @ref="_scrubberElement"
+                   class="keyboard-scrubber"
                    type="range"
                    min="0"
                    max="@Math.Max(0, _hoverIndex.Timestamps.Count - 1)"
@@ -114,22 +171,31 @@ else
 
             @if (_hover is not null)
             {
-                <div id="chart-hover-card"
-                     class="hover-card @(_hoverCardPercent > 63 ? "flip" : null)"
-                     style="left:@(_hoverCardPercent.ToString("0.##", CultureInfo.InvariantCulture))%"
-                     role="status"
-                     aria-live="@(_hasKeyboardFocus ? "polite" : "off")">
+                <aside id="chart-hover-card"
+                       class="hover-card @(_selectionState.IsPinned ? "pinned" : "preview") @(_hoverCardPercent > 63 ? "flip" : null)"
+                       style="left:@(_hoverCardPercent.ToString("0.##", CultureInfo.InvariantCulture))%"
+                       aria-label="Selected chart observation details">
                     <header>
-                        <div>
-                            <span>@(_hover.HasStrictComparison ? "STRICT BUILD MATCH" : "NEAREST SAMPLES")</span>
+                        <div aria-live="@(_hasKeyboardFocus ? "polite" : "off")">
+                            <span class="selection-status">@(_selectionState.IsPinned ? "PINNED SELECTION" : "READ-ONLY PREVIEW")</span>
                             <strong>@_hover.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</strong>
+                            <small>@(_hover.HasStrictComparison ? "Strict build match" : "Nearest samples")</small>
                         </div>
-                        <span class="mode-badge">@(Normalized ? "normalized" : "raw")</span>
+                        @if (_selectionState.IsPinned)
+                        {
+                            <button type="button"
+                                    class="close-card"
+                                    aria-label="Unpin and close observation details"
+                                    @onclick="ClearPinnedSelection">
+                                ×
+                            </button>
+                        }
                     </header>
 
                     <div class="hover-runs">
                         @foreach (var point in _hover.Points)
                         {
+                            var identity = ObservationIdentity.From(point.Observation);
                             <section>
                                 <div class="hover-run-heading">
                                     <i style="background:@point.History.Run.Color"></i>
@@ -161,25 +227,59 @@ else
                                         <dd title="@point.Observation.TraceName">@(point.Observation.TraceName ?? "not reported")</dd>
                                     </div>
                                 </dl>
+                                @if (_selectionState.IsPinned)
+                                {
+                                    <div class="pin-actions" aria-label="Regression investigation pins">
+                                        <button type="button"
+                                                class="pin-a"
+                                                disabled="@(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity)"
+                                                @onclick="() => RequestPinAsync(InvestigationPinSlot.BaselineA, point)">
+                                            @(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity ? "Pinned as A" : "Set baseline A")
+                                        </button>
+                                        <button type="button"
+                                                class="pin-b"
+                                                disabled="@(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity)"
+                                                @onclick="() => RequestPinAsync(InvestigationPinSlot.ComparisonB, point)">
+                                            @(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity ? "Pinned as B" : "Set comparison B")
+                                        </button>
+                                    </div>
+                                }
                             </section>
                         }
                     </div>
-                </div>
+                </aside>
             }
         </div>
 
+        @if (InvestigationGuidance is not null)
+        {
+            <div class="investigation-guidance" role="status" aria-live="polite">
+                @InvestigationGuidance
+            </div>
+        }
+
         <div class="chart-caption">
             <span>@(Normalized ? "Ratio to the first selected run on strict matches" : "Raw reported primary-trace values")</span>
-            <span id="chart-hover-instructions">Hover the plot or focus it and use ←/→, Home, and End</span>
+            <span id="chart-hover-instructions">
+                Hover or use ←/→, Home, End to preview · click/tap or press Enter/Space to pin · Escape to unpin
+            </span>
         </div>
-    </div>
-}
+    }
+</div>
 
 @code {
     private const double PlotLeft = 86;
     private const double PlotTop = 24;
     private const double PlotWidth = 884;
     private const double PlotHeight = 340;
+
+    private static readonly IReadOnlyList<RangeOption> RangeOptions =
+    [
+        new("30d", HistoryTimeRange.ThirtyDays),
+        new("90d", HistoryTimeRange.NinetyDays),
+        new("1y", HistoryTimeRange.OneYear),
+        new("All", HistoryTimeRange.All)
+    ];
 
     [Parameter, EditorRequired]
     public IReadOnlyList<BenchmarkHistory> Histories { get; set; } = [];
@@ -190,18 +290,67 @@ else
     [Parameter]
     public bool Normalized { get; set; }
 
+    [Parameter]
+    public HistoryTimeRange TimeRange { get; set; } = HistoryTimeRange.All;
+
+    [Parameter]
+    public EventCallback<HistoryTimeRange> TimeRangeChanged { get; set; }
+
+    [Parameter]
+    public InvestigationPin? BaselinePin { get; set; }
+
+    [Parameter]
+    public InvestigationPin? ComparisonPin { get; set; }
+
+    [Parameter]
+    public EventCallback<InvestigationPinRequest> PinRequested { get; set; }
+
+    private ElementReference _chartElement;
+    private ElementReference _scrubberElement;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _dragHandle;
+    private DotNetObjectReference<HistoryChart>? _selfReference;
+    private IReadOnlyList<BenchmarkHistory> _visibleHistories = [];
+    private IReadOnlyList<MatchedComparison> _visibleMatches = [];
     private IReadOnlyList<ChartSeries> _series = [];
     private IReadOnlyList<HitRegion> _hitRegions = [];
     private ChartHoverIndex _hoverIndex = new([], [], false);
+    private readonly ChartSelectionState _selectionState = new();
     private ChartHoverSelection? _hover;
     private long _minTicks;
     private long _maxTicks;
     private double _minY;
     private double _maxY;
-    private bool _pointerInside;
+    private DateTime _availableMinimum;
+    private DateTime _availableMaximum;
     private bool _hasKeyboardFocus;
+    private bool _pointerInside;
+    private bool _needsDragInitialization;
+    private string? _selectionScope;
 
     private IReadOnlyList<ChartSeries> Series => _series;
+
+    private IEnumerable<PinMarker> VisiblePinMarkers
+    {
+        get
+        {
+            if (BaselinePin is not null && IsVisible(BaselinePin.Identity.Timestamp))
+            {
+                yield return new PinMarker(
+                    InvestigationPinSlot.BaselineA,
+                    BaselinePin,
+                    "pin-a");
+            }
+
+            if (ComparisonPin is not null && IsVisible(ComparisonPin.Identity.Timestamp))
+            {
+                yield return new PinMarker(
+                    InvestigationPinSlot.ComparisonB,
+                    ComparisonPin,
+                    "pin-b");
+            }
+        }
+    }
 
     private double _hoverCardPercent =>
         _hover is null
@@ -212,10 +361,65 @@ else
         (_hover?.Timestamp ?? _hoverIndex.Timestamps.LastOrDefault())
             .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
+    private string? InvestigationGuidance =>
+        (BaselinePin, ComparisonPin) switch
+        {
+            (not null, null) =>
+                "Baseline A set — select and pin another timestamp, then choose Set comparison B.",
+            (null, not null) =>
+                "Comparison B set — select and pin another timestamp, then choose Set baseline A.",
+            (not null, not null) =>
+                "Baseline A and comparison B are set — the comparison is shown below. Pin another timestamp to replace either point.",
+            _ => null
+        };
+
     protected override void OnParametersSet()
     {
-        _hoverIndex = new ChartHoverIndex(Histories, Matches, Normalized);
-        _hover = null;
+        var allTimestamps = Histories
+            .SelectMany(history => history.Observations)
+            .Select(observation => observation.Timestamp)
+            .ToArray();
+        if (allTimestamps.Length == 0)
+        {
+            _visibleHistories = [];
+            _visibleMatches = [];
+            _series = [];
+            _hoverIndex = new([], [], Normalized);
+            _selectionState.Reset();
+            _hover = null;
+            return;
+        }
+
+        _availableMinimum = allTimestamps.Min();
+        _availableMaximum = allTimestamps.Max();
+        var visibleRange = TimeRange.Resolve(_availableMinimum, _availableMaximum);
+        _visibleHistories = Histories
+            .Select(history => history with
+            {
+                Observations = history.Observations
+                    .Where(observation =>
+                        observation.Timestamp >= visibleRange.Start
+                        && observation.Timestamp <= visibleRange.End)
+                    .ToArray()
+            })
+            .ToArray();
+        _visibleMatches = Matches
+            .Where(match =>
+                match.Key.Timestamp >= visibleRange.Start
+                && match.Key.Timestamp <= visibleRange.End)
+            .ToArray();
+        _hoverIndex = new ChartHoverIndex(_visibleHistories, _visibleMatches, Normalized);
+        var selectionScope = string.Join(
+            '|',
+            _visibleHistories.Select(history => $"{history.Benchmark}:{history.Run.Id}"));
+        if (!string.Equals(_selectionScope, selectionScope, StringComparison.Ordinal))
+        {
+            _selectionState.Reset();
+            _selectionScope = selectionScope;
+        }
+
+        _selectionState.Reconcile(_hoverIndex.Timestamps);
+        RefreshDisplayedSelection();
         _series = BuildSeries();
         if (_series.Count == 0)
         {
@@ -238,13 +442,98 @@ else
         _minY = rawMin - padding;
         _maxY = rawMax + padding;
         _hitRegions = BuildHitRegions();
+        _needsDragInitialization = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_needsDragInitialization || Series.Count == 0)
+        {
+            return;
+        }
+
+        _needsDragInitialization = false;
+        _module ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import",
+            "./Components/HistoryChart.razor.js");
+        if (_dragHandle is not null)
+        {
+            await _dragHandle.InvokeVoidAsync("dispose");
+            await _dragHandle.DisposeAsync();
+        }
+
+        _selfReference ??= DotNetObjectReference.Create(this);
+        _dragHandle = await _module.InvokeAsync<IJSObjectReference>(
+            "initializeRangeDrag",
+            _chartElement,
+            _scrubberElement,
+            _selfReference,
+            PlotLeft,
+            PlotWidth);
+    }
+
+    [JSInvokable]
+    public async Task CompleteRangeDrag(double startRatio, double endRatio)
+    {
+        var start = Math.Clamp(Math.Min(startRatio, endRatio), 0, 1);
+        var end = Math.Clamp(Math.Max(startRatio, endRatio), 0, 1);
+        if (end - start < .005)
+        {
+            return;
+        }
+
+        var startTicks = MinTicks + (long)((MaxTicks - MinTicks) * start);
+        var endTicks = MinTicks + (long)((MaxTicks - MinTicks) * end);
+        await ChangeRangeAsync(HistoryTimeRange.Custom(
+            new DateTime(startTicks, DateTimeKind.Unspecified),
+            new DateTime(endTicks, DateTimeKind.Unspecified)));
+    }
+
+    [JSInvokable]
+    public Task PinAtRatio(double ratio)
+    {
+        if (_hoverIndex.Timestamps.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var targetTicks = MinTicks
+            + (long)((MaxTicks - MinTicks) * Math.Clamp(ratio, 0, 1));
+        var selection = _hoverIndex.SelectNearest(
+            new DateTime(targetTicks, DateTimeKind.Unspecified));
+        if (selection is not null)
+        {
+            _selectionState.Pin(selection.Timestamp);
+            RefreshDisplayedSelection();
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task TogglePinnedSelection()
+    {
+        _selectionState.TogglePin();
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task UnpinSelection()
+    {
+        _selectionState.Unpin(clearTarget: false);
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     private IReadOnlyList<ChartSeries> BuildSeries()
     {
         if (!Normalized)
         {
-            return Histories
+            return _visibleHistories
                 .Select(history => new ChartSeries(
                     history,
                     history.Observations
@@ -256,16 +545,16 @@ else
                 .ToArray();
         }
 
-        if (Histories.Count == 0)
+        if (_visibleHistories.Count == 0)
         {
             return [];
         }
 
-        var baselineId = Histories[0].Run.Id;
-        return Histories
+        var baselineId = _visibleHistories[0].Run.Id;
+        return _visibleHistories
             .Select(history => new ChartSeries(
                 history,
-                Matches
+                _visibleMatches
                     .Where(match => match.Observations[baselineId].Value != 0)
                     .Select(match =>
                     {
@@ -286,6 +575,9 @@ else
     private double MinY => _minY;
 
     private double MaxY => _maxY;
+
+    private bool IsVisible(DateTime timestamp) =>
+        timestamp.Ticks >= MinTicks && timestamp.Ticks <= MaxTicks;
 
     private double ScaleX(long ticks) =>
         PlotLeft + (ticks - MinTicks) / (double)(MaxTicks - MinTicks) * PlotWidth;
@@ -339,34 +631,42 @@ else
         return regions;
     }
 
-    private void SelectTimeline(int timelineIndex)
+    private void HoverTimeline(int timelineIndex)
     {
         _pointerInside = true;
-        _hover = _hoverIndex.SelectAt(timelineIndex);
+        var selection = _hoverIndex.SelectAt(timelineIndex);
+        if (selection is null)
+        {
+            return;
+        }
+
+        _selectionState.Hover(selection.Timestamp);
+        RefreshDisplayedSelection();
     }
 
     private void OnChartPointerLeave()
     {
         _pointerInside = false;
-        if (!_hasKeyboardFocus)
-        {
-            _hover = null;
-        }
+        _selectionState.Leave(_hasKeyboardFocus);
+        RefreshDisplayedSelection();
     }
 
     private void OnScrubberFocus()
     {
         _hasKeyboardFocus = true;
-        _hover ??= _hoverIndex.SelectAt(_hoverIndex.Timestamps.Count - 1);
+        if (_selectionState.DisplayTimestamp is null
+            && _hoverIndex.Timestamps.Count > 0)
+        {
+            _selectionState.Scrub(_hoverIndex.Timestamps[^1]);
+            RefreshDisplayedSelection();
+        }
     }
 
     private void OnScrubberBlur()
     {
         _hasKeyboardFocus = false;
-        if (!_pointerInside)
-        {
-            _hover = null;
-        }
+        _selectionState.Leave(_pointerInside);
+        RefreshDisplayedSelection();
     }
 
     private void OnScrubberInput(ChangeEventArgs eventArgs)
@@ -381,8 +681,59 @@ else
             return;
         }
 
-        _hover = _hoverIndex.SelectAt(timelineIndex);
+        var selection = _hoverIndex.SelectAt(timelineIndex);
+        if (selection is not null)
+        {
+            _selectionState.Scrub(selection.Timestamp);
+            RefreshDisplayedSelection();
+        }
     }
+
+    private void OnPlotKeyDown(KeyboardEventArgs eventArgs)
+    {
+        if (eventArgs.Key == "Escape" && _selectionState.IsPinned)
+        {
+            _selectionState.Unpin(clearTarget: false);
+            RefreshDisplayedSelection();
+        }
+    }
+
+    private void ClearPinnedSelection()
+    {
+        _selectionState.Unpin(clearTarget: true);
+        RefreshDisplayedSelection();
+    }
+
+    private void RefreshDisplayedSelection()
+    {
+        _hover = _selectionState.DisplayTimestamp is null
+            ? null
+            : _hoverIndex.SelectNearest(_selectionState.DisplayTimestamp.Value);
+    }
+
+    private async Task RequestPinAsync(
+        InvestigationPinSlot slot,
+        ChartHoverPoint point)
+    {
+        await PinRequested.InvokeAsync(new InvestigationPinRequest(
+            slot,
+            new InvestigationPin(
+                point.History.Run.Id,
+                ObservationIdentity.From(point.Observation))));
+        _selectionState.Unpin(clearTarget: true);
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        await Task.Yield();
+        await _scrubberElement.FocusAsync(preventScroll: true);
+    }
+
+    private async Task ChangeRangeAsync(HistoryTimeRange range)
+    {
+        _hover = null;
+        await TimeRangeChanged.InvokeAsync(range);
+    }
+
+    private Task ResetRangeAsync() => ChangeRangeAsync(HistoryTimeRange.All);
 
     private string FormatAxisValue(double value) =>
         Normalized
@@ -400,6 +751,30 @@ else
     private static string FormatError(double? error) =>
         error is null ? string.Empty : $" ± {FormatValue(error.Value)}";
 
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_dragHandle is not null)
+            {
+                await _dragHandle.InvokeVoidAsync("dispose");
+                await _dragHandle.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
+        _selfReference?.Dispose();
+    }
+
+    private sealed record RangeOption(string Label, HistoryTimeRange Range);
+
     private sealed record ChartPoint(DateTime Timestamp, double Value);
 
     private sealed record HitRegion(int TimelineIndex, double X, double Width);
@@ -407,4 +782,9 @@ else
     private sealed record ChartSeries(
         BenchmarkHistory History,
         IReadOnlyList<ChartPoint> Points);
+
+    private sealed record PinMarker(
+        InvestigationPinSlot Slot,
+        InvestigationPin Pin,
+        string CssClass);
 }
