@@ -16,7 +16,7 @@ public sealed record VariabilityBandPoint(
 
 public static class RollingVariabilityCalculator
 {
-    public const int DefaultWindow = 15;
+    public const int DefaultWindow = 31;
 
     public static IReadOnlyList<int> SupportedWindows { get; } = [7, 15, 31];
 

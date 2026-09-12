@@ -37,10 +37,14 @@ Use **30d**, **90d**, **1y**, or **All** to focus the chart, or drag across the
 plot to create a custom zoom range. Open an observation detail card and pin one
 observation from a run as **baseline A**, then another observation from that
 same run as **comparison B**. Pins remain visible while inspecting other points.
-Enable **Rolling median + IQR** to overlay a descriptive trailing variability
-band for each visible series. The selectable 7, 15, and 31-observation windows
-use only primary-series values; the shaded area spans Q1–Q3 and the dashed line
-is the rolling median. The default is 15 observations.
+Enable **Variability analysis** to keep the combined linear chart as the
+magnitude overview while adding one aligned small multiple per runtime. Each
+small multiple has its own linear value axis and overlays a descriptive trailing
+median with a Q1–Q3 band. A shared subplot reports relative volatility as
+`100 × IQR / |rolling median|`, making dispersion comparable when runtimes
+differ by orders of magnitude. The selectable 7, 15, and 31-observation windows
+use only primary-series values; the default is 31 observations (roughly one
+week at the current publication cadence).
 
 The regression panel always presents the observations older-first, even when A
 and B were selected in reverse. It reports the raw values/errors, absolute and
@@ -54,9 +58,11 @@ pin plus three neighbors on either side). It compares medians and reports the
 interpolated 25th/75th percentiles and IQR with sample counts. It intentionally
 does not claim statistical significance or calculate a p-value.
 
-Rolling variability bands are likewise descriptive context, not a confidence
+Rolling variability panels are likewise descriptive context, not a confidence
 interval or significance test. In normalized mode they are calculated from the
-displayed strict-match ratios rather than mixing raw measurement units.
+displayed strict-match ratios rather than mixing raw measurement units. Lines
+break across unusually long publication gaps instead of implying continuous
+measurement.
 
 Benchmark, selected runs, chart mode/range, variability-band settings,
 investigation run, summary method, and exact A/B identities are encoded in the
