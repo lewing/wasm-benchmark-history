@@ -205,6 +205,12 @@ svg {
     vector-effect: non-scaling-stroke;
 }
 
+.hover-crosshair.pinned {
+    stroke: #edf3ff;
+    stroke-dasharray: none;
+    stroke-width: 2;
+}
+
 .hover-point-halo,
 .hover-point {
     pointer-events: none;
@@ -218,6 +224,14 @@ svg {
 .hover-point {
     stroke: #edf3ff;
     stroke-width: 2;
+}
+
+.hover-point-halo.pinned {
+    opacity: .42;
+}
+
+.hover-point.pinned {
+    stroke-width: 3;
 }
 
 .pin-line {
@@ -270,6 +284,16 @@ svg {
     z-index: 3;
 }
 
+.hover-card.preview {
+    pointer-events: none;
+}
+
+.hover-card.pinned {
+    background: rgb(7 17 32 / 96%);
+    border-color: rgb(237 243 255 / 52%);
+    box-shadow: 0 16px 42px rgb(0 0 0 / 48%), 0 0 0 1px rgb(100 225 255 / 10%);
+}
+
 .hover-card.flip {
     transform: translateX(calc(-100% - 12px));
 }
@@ -298,16 +322,27 @@ svg {
     display: block;
 }
 
-.hover-card header div > span {
+.hover-card header div > .selection-status {
     color: var(--accent);
     font-size: .55rem;
     font-weight: 800;
     letter-spacing: .12em;
 }
 
+.hover-card.pinned header div > .selection-status {
+    color: #f9d56e;
+}
+
 .hover-card header strong {
     font-family: var(--mono);
     font-size: .78rem;
+    margin-top: .18rem;
+}
+
+.hover-card header small {
+    color: var(--muted);
+    display: block;
+    font-size: .56rem;
     margin-top: .18rem;
 }
 

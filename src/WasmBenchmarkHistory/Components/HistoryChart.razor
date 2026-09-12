@@ -48,14 +48,16 @@
             }
         </div>
 
-        <div class="plot-area">
+        <div class="plot-area" @onkeydown="OnPlotKeyDown">
             <div class="svg-wrap">
                 <svg @ref="_chartElement"
+                     class="@(_selectionState.IsPinned ? "selection-pinned" : null)"
                      viewBox="0 0 1000 430"
                      preserveAspectRatio="none"
                      role="img"
                      aria-label="Historical benchmark line chart"
-                     aria-describedby="chart-hover-instructions">
+                     aria-describedby="chart-hover-instructions"
+                     @onpointerleave="OnChartPointerLeave">
                     <rect class="plot-background" x="@PlotLeft" y="@PlotTop" width="@PlotWidth" height="@PlotHeight" rx="8" />
 
                     @for (var tick = 0; tick <= 4; tick++)
@@ -114,19 +116,19 @@
 
                     @if (_hover is not null)
                     {
-                        <line class="hover-crosshair"
+                        <line class="hover-crosshair @(_selectionState.IsPinned ? "pinned" : null)"
                               x1="@ScaleX(_hover.Timestamp.Ticks)"
                               y1="@PlotTop"
                               x2="@ScaleX(_hover.Timestamp.Ticks)"
                               y2="@(PlotTop + PlotHeight)" />
                         @foreach (var point in _hover.Points)
                         {
-                            <circle class="hover-point-halo"
+                            <circle class="hover-point-halo @(_selectionState.IsPinned ? "pinned" : null)"
                                     cx="@ScaleX(point.Observation.Timestamp.Ticks)"
                                     cy="@ScaleY(point.DisplayValue)"
                                     r="8"
                                     fill="@point.History.Run.Color" />
-                            <circle class="hover-point"
+                            <circle class="hover-point @(_selectionState.IsPinned ? "pinned" : null)"
                                     cx="@ScaleX(point.Observation.Timestamp.Ticks)"
                                     cy="@ScaleY(point.DisplayValue)"
                                     r="4.5"
@@ -148,13 +150,13 @@
                               y="@PlotTop"
                               width="@region.Width"
                               height="@PlotHeight"
-                              @onpointerenter="() => SelectTimeline(region.TimelineIndex)"
-                              @onclick="() => SelectTimeline(region.TimelineIndex)" />
+                              @onpointerenter="() => HoverTimeline(region.TimelineIndex)" />
                     }
                 </svg>
             </div>
 
-            <input class="keyboard-scrubber"
+            <input @ref="_scrubberElement"
+                   class="keyboard-scrubber"
                    type="range"
                    min="0"
                    max="@Math.Max(0, _hoverIndex.Timestamps.Count - 1)"
@@ -170,15 +172,24 @@
             @if (_hover is not null)
             {
                 <aside id="chart-hover-card"
-                       class="hover-card @(_hoverCardPercent > 63 ? "flip" : null)"
+                       class="hover-card @(_selectionState.IsPinned ? "pinned" : "preview") @(_hoverCardPercent > 63 ? "flip" : null)"
                        style="left:@(_hoverCardPercent.ToString("0.##", CultureInfo.InvariantCulture))%"
                        aria-label="Selected chart observation details">
                     <header>
                         <div aria-live="@(_hasKeyboardFocus ? "polite" : "off")">
-                            <span>@(_hover.HasStrictComparison ? "STRICT BUILD MATCH" : "NEAREST SAMPLES")</span>
+                            <span class="selection-status">@(_selectionState.IsPinned ? "PINNED SELECTION" : "READ-ONLY PREVIEW")</span>
                             <strong>@_hover.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</strong>
+                            <small>@(_hover.HasStrictComparison ? "Strict build match" : "Nearest samples")</small>
                         </div>
-                        <button type="button" class="close-card" aria-label="Close observation details" @onclick="ClearHover">×</button>
+                        @if (_selectionState.IsPinned)
+                        {
+                            <button type="button"
+                                    class="close-card"
+                                    aria-label="Unpin and close observation details"
+                                    @onclick="ClearPinnedSelection">
+                                ×
+                            </button>
+                        }
                     </header>
 
                     <div class="hover-runs">
@@ -216,20 +227,23 @@
                                         <dd title="@point.Observation.TraceName">@(point.Observation.TraceName ?? "not reported")</dd>
                                     </div>
                                 </dl>
-                                <div class="pin-actions" aria-label="Regression investigation pins">
-                                    <button type="button"
-                                            class="pin-a"
-                                            disabled="@(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity)"
-                                            @onclick="() => RequestPinAsync(InvestigationPinSlot.BaselineA, point)">
-                                        @(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity ? "Pinned as A" : "Set baseline A")
-                                    </button>
-                                    <button type="button"
-                                            class="pin-b"
-                                            disabled="@(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity)"
-                                            @onclick="() => RequestPinAsync(InvestigationPinSlot.ComparisonB, point)">
-                                        @(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity ? "Pinned as B" : "Set comparison B")
-                                    </button>
-                                </div>
+                                @if (_selectionState.IsPinned)
+                                {
+                                    <div class="pin-actions" aria-label="Regression investigation pins">
+                                        <button type="button"
+                                                class="pin-a"
+                                                disabled="@(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity)"
+                                                @onclick="() => RequestPinAsync(InvestigationPinSlot.BaselineA, point)">
+                                            @(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity ? "Pinned as A" : "Set baseline A")
+                                        </button>
+                                        <button type="button"
+                                                class="pin-b"
+                                                disabled="@(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity)"
+                                                @onclick="() => RequestPinAsync(InvestigationPinSlot.ComparisonB, point)">
+                                            @(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity ? "Pinned as B" : "Set comparison B")
+                                        </button>
+                                    </div>
+                                }
                             </section>
                         }
                     </div>
@@ -239,7 +253,9 @@
 
         <div class="chart-caption">
             <span>@(Normalized ? "Ratio to the first selected run on strict matches" : "Raw reported primary-trace values")</span>
-            <span id="chart-hover-instructions">Hover the plot or focus it and use ←/→, Home, and End</span>
+            <span id="chart-hover-instructions">
+                Hover or use ←/→, Home, End to preview · click/tap or press Enter/Space to pin · Escape to unpin
+            </span>
         </div>
     }
 </div>
@@ -283,6 +299,7 @@
     public EventCallback<InvestigationPinRequest> PinRequested { get; set; }
 
     private ElementReference _chartElement;
+    private ElementReference _scrubberElement;
     private IJSObjectReference? _module;
     private IJSObjectReference? _dragHandle;
     private DotNetObjectReference<HistoryChart>? _selfReference;
@@ -291,6 +308,7 @@
     private IReadOnlyList<ChartSeries> _series = [];
     private IReadOnlyList<HitRegion> _hitRegions = [];
     private ChartHoverIndex _hoverIndex = new([], [], false);
+    private readonly ChartSelectionState _selectionState = new();
     private ChartHoverSelection? _hover;
     private long _minTicks;
     private long _maxTicks;
@@ -299,7 +317,9 @@
     private DateTime _availableMinimum;
     private DateTime _availableMaximum;
     private bool _hasKeyboardFocus;
+    private bool _pointerInside;
     private bool _needsDragInitialization;
+    private string? _selectionScope;
 
     private IReadOnlyList<ChartSeries> Series => _series;
 
@@ -345,6 +365,9 @@
             _visibleHistories = [];
             _visibleMatches = [];
             _series = [];
+            _hoverIndex = new([], [], Normalized);
+            _selectionState.Reset();
+            _hover = null;
             return;
         }
 
@@ -367,7 +390,17 @@
                 && match.Key.Timestamp <= visibleRange.End)
             .ToArray();
         _hoverIndex = new ChartHoverIndex(_visibleHistories, _visibleMatches, Normalized);
-        _hover = null;
+        var selectionScope = string.Join(
+            '|',
+            _visibleHistories.Select(history => $"{history.Benchmark}:{history.Run.Id}"));
+        if (!string.Equals(_selectionScope, selectionScope, StringComparison.Ordinal))
+        {
+            _selectionState.Reset();
+            _selectionScope = selectionScope;
+        }
+
+        _selectionState.Reconcile(_hoverIndex.Timestamps);
+        RefreshDisplayedSelection();
         _series = BuildSeries();
         if (_series.Count == 0)
         {
@@ -414,6 +447,7 @@
         _dragHandle = await _module.InvokeAsync<IJSObjectReference>(
             "initializeRangeDrag",
             _chartElement,
+            _scrubberElement,
             _selfReference,
             PlotLeft,
             PlotWidth);
@@ -434,6 +468,46 @@
         await ChangeRangeAsync(HistoryTimeRange.Custom(
             new DateTime(startTicks, DateTimeKind.Unspecified),
             new DateTime(endTicks, DateTimeKind.Unspecified)));
+    }
+
+    [JSInvokable]
+    public Task PinAtRatio(double ratio)
+    {
+        if (_hoverIndex.Timestamps.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var targetTicks = MinTicks
+            + (long)((MaxTicks - MinTicks) * Math.Clamp(ratio, 0, 1));
+        var selection = _hoverIndex.SelectNearest(
+            new DateTime(targetTicks, DateTimeKind.Unspecified));
+        if (selection is not null)
+        {
+            _selectionState.Pin(selection.Timestamp);
+            RefreshDisplayedSelection();
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task TogglePinnedSelection()
+    {
+        _selectionState.TogglePin();
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task UnpinSelection()
+    {
+        _selectionState.Unpin(clearTarget: false);
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     private IReadOnlyList<ChartSeries> BuildSeries()
@@ -538,16 +612,43 @@
         return regions;
     }
 
-    private void SelectTimeline(int timelineIndex) =>
-        _hover = _hoverIndex.SelectAt(timelineIndex);
+    private void HoverTimeline(int timelineIndex)
+    {
+        _pointerInside = true;
+        var selection = _hoverIndex.SelectAt(timelineIndex);
+        if (selection is null)
+        {
+            return;
+        }
+
+        _selectionState.Hover(selection.Timestamp);
+        RefreshDisplayedSelection();
+    }
+
+    private void OnChartPointerLeave()
+    {
+        _pointerInside = false;
+        _selectionState.Leave(_hasKeyboardFocus);
+        RefreshDisplayedSelection();
+    }
 
     private void OnScrubberFocus()
     {
         _hasKeyboardFocus = true;
-        _hover ??= _hoverIndex.SelectAt(_hoverIndex.Timestamps.Count - 1);
+        if (_selectionState.DisplayTimestamp is null
+            && _hoverIndex.Timestamps.Count > 0)
+        {
+            _selectionState.Scrub(_hoverIndex.Timestamps[^1]);
+            RefreshDisplayedSelection();
+        }
     }
 
-    private void OnScrubberBlur() => _hasKeyboardFocus = false;
+    private void OnScrubberBlur()
+    {
+        _hasKeyboardFocus = false;
+        _selectionState.Leave(_pointerInside);
+        RefreshDisplayedSelection();
+    }
 
     private void OnScrubberInput(ChangeEventArgs eventArgs)
     {
@@ -561,10 +662,35 @@
             return;
         }
 
-        _hover = _hoverIndex.SelectAt(timelineIndex);
+        var selection = _hoverIndex.SelectAt(timelineIndex);
+        if (selection is not null)
+        {
+            _selectionState.Scrub(selection.Timestamp);
+            RefreshDisplayedSelection();
+        }
     }
 
-    private void ClearHover() => _hover = null;
+    private void OnPlotKeyDown(KeyboardEventArgs eventArgs)
+    {
+        if (eventArgs.Key == "Escape" && _selectionState.IsPinned)
+        {
+            _selectionState.Unpin(clearTarget: false);
+            RefreshDisplayedSelection();
+        }
+    }
+
+    private void ClearPinnedSelection()
+    {
+        _selectionState.Unpin(clearTarget: true);
+        RefreshDisplayedSelection();
+    }
+
+    private void RefreshDisplayedSelection()
+    {
+        _hover = _selectionState.DisplayTimestamp is null
+            ? null
+            : _hoverIndex.SelectNearest(_selectionState.DisplayTimestamp.Value);
+    }
 
     private async Task RequestPinAsync(
         InvestigationPinSlot slot,

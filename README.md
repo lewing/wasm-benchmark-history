@@ -19,6 +19,10 @@ can show complete raw histories or normalize strict matched observations to the
 first selected run. Hover the chart to inspect the nearest timestamp, or focus
 it and use the left/right arrow, Home, and End keys. The detail card reports
 each run's value, build identities, trace name, and strict ratio when available.
+Hover and keyboard scrubbing are read-only previews. Click or tap a timestamp,
+or press Enter/Space while the chart scrubber is focused, to pin the card and
+reveal A/B actions. A pinned card remains stable while the pointer moves; click
+another timestamp to move it, or press Escape/use its close button to unpin.
 
 ### Investigate a temporal regression
 

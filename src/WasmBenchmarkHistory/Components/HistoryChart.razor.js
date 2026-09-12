@@ -1,4 +1,4 @@
-export function initializeRangeDrag(svg, dotNet, plotLeft, plotWidth) {
+export function initializeRangeDrag(svg, scrubber, dotNet, plotLeft, plotWidth) {
     const selection = svg.querySelector(".zoom-selection");
     let startX = null;
     let dragged = false;
@@ -69,11 +69,23 @@ export function initializeRangeDrag(svg, dotNet, plotLeft, plotWidth) {
         clearGesture(event);
     }
 
-    function click(event) {
+    async function click(event) {
         if (dragged) {
             event.preventDefault();
             event.stopPropagation();
             dragged = false;
+            return;
+        }
+
+        const ratio = (toPlotX(event) - plotLeft) / plotWidth;
+        await dotNet.invokeMethodAsync("PinAtRatio", ratio);
+        scrubber.focus({ preventScroll: true });
+    }
+
+    function scrubberKeyDown(event) {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            void dotNet.invokeMethodAsync("TogglePinnedSelection");
         }
     }
 
@@ -82,6 +94,7 @@ export function initializeRangeDrag(svg, dotNet, plotLeft, plotWidth) {
     svg.addEventListener("pointerup", pointerUp, true);
     svg.addEventListener("pointercancel", pointerCancel, true);
     svg.addEventListener("click", click, true);
+    scrubber.addEventListener("keydown", scrubberKeyDown);
 
     return {
         dispose() {
@@ -90,6 +103,7 @@ export function initializeRangeDrag(svg, dotNet, plotLeft, plotWidth) {
             svg.removeEventListener("pointerup", pointerUp, true);
             svg.removeEventListener("pointercancel", pointerCancel, true);
             svg.removeEventListener("click", click, true);
+            scrubber.removeEventListener("keydown", scrubberKeyDown);
         }
     };
 }
