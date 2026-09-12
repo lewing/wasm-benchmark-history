@@ -79,7 +79,7 @@ public static class BuildComparison
         if (snapshot.Lanes.Length != LaneIds.Length ||
             !snapshot.Lanes.Select(lane => lane.Provenance.Id).Order(StringComparer.Ordinal)
                 .SequenceEqual(LaneIds.Order(StringComparer.Ordinal)))
-            throw new InvalidDataException("Exactly one of each of the four WASM runtime lanes is required.");
+            throw new InvalidDataException("Exactly one of each of the four Wasm runtime lanes is required.");
         if (string.IsNullOrWhiteSpace(snapshot.Build.BuildId) ||
             !IsSha(snapshot.Build.RuntimeSha) || !IsSha(snapshot.Build.PerformanceSha))
             throw new InvalidDataException("Build ID and full runtime/performance commit SHAs are required.");

@@ -1,9 +1,9 @@
-# WASM benchmark history
+# Wasm benchmark history
 
 [![CI](https://github.com/lewing/wasm-benchmark-history/actions/workflows/ci.yml/badge.svg)](https://github.com/lewing/wasm-benchmark-history/actions/workflows/ci.yml)
 [![Live data smoke](https://github.com/lewing/wasm-benchmark-history/actions/workflows/live-smoke.yml/badge.svg)](https://github.com/lewing/wasm-benchmark-history/actions/workflows/live-smoke.yml)
 
-A narrowly scoped, server-hosted Blazor app for comparing historical .NET WASM
+A narrowly scoped, server-hosted Blazor app for comparing historical .NET Wasm
 microbenchmark results published by
 [`dotnet/performance`](https://github.com/dotnet/performance).
 

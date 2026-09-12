@@ -15,22 +15,22 @@ public static class KnownRunConfigurations
     [
         new(
             "mono-wasm",
-            "Mono WASM",
+            "Mono Wasm",
             new Uri(BaseUrl + "/reports/allTestHistory/refs/heads/main_x64_ubuntu%2022.04_CompilationMode=wasm_RunKind=micro/ViperUbuntu/AllTestindex.html"),
             "#4f7cff",
-            "Mono interpreter/JIT WASM microbenchmarks"),
+            "Mono interpreter/JIT Wasm microbenchmarks"),
         new(
             "mono-wasm-aot",
-            "Mono WASM AOT",
+            "Mono Wasm AOT",
             new Uri(BaseUrl + "/reports/allTestHistory/refs/heads/main_x64_ubuntu%2022.04_AOT=true_CompilationMode=wasm_RunKind=micro/ViperUbuntu/AllTestindex.html"),
             "#f4a340",
-            "Mono ahead-of-time compiled WASM microbenchmarks"),
+            "Mono ahead-of-time compiled Wasm microbenchmarks"),
         new(
             "coreclr-wasm",
-            "CoreCLR WASM",
+            "CoreCLR Wasm",
             new Uri(BaseUrl + "/reports/allTestHistory/refs/heads/main_x64_ubuntu%2022.04_CompilationMode=wasm_RunKind=micro_RuntimeType=coreclr/ViperUbuntu/AllTestindex.html"),
             "#20b486",
-            "CoreCLR WASM microbenchmarks")
+            "CoreCLR Wasm microbenchmarks")
     ];
 
     public static RunConfiguration Get(string id) =>
