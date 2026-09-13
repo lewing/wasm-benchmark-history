@@ -47,15 +47,21 @@
 }
 
 .source-link,
-.comparison-link {
+.site-nav a {
     color: var(--muted);
     font-size: .82rem;
     text-decoration: none;
 }
 
 .source-link:hover,
-.comparison-link:hover {
+.site-nav a:hover {
     color: var(--ink);
+}
+
+.site-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
 }
 
 main {

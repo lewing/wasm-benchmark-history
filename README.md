@@ -72,6 +72,63 @@ investigation run, summary method, and exact A/B identities are encoded in the
 query string. Reloading or sharing the URL restores valid state; malformed,
 unavailable, or ambiguous fields are ignored with an on-page explanation.
 
+## Autofiled change-set prototype
+
+Open **Change set** (`/change-set`) to import a public
+[`dotnet/perf-autofiling-issues`](https://github.com/dotnet/perf-autofiling-issues)
+issue. Accepted inputs are a bare issue number, an
+`owner/repo#number` reference, or the canonical public issue URL. The prototype
+intentionally rejects every repository except `dotnet/perf-autofiling-issues`,
+does not follow HTTP redirects, and fetches GitHub data only from the server.
+
+The importer reads hidden `DATA` metadata, repeated run-information sections,
+improvement/regression groups, benchmark table rows, exact history/source/report
+links, reported values, Test Quality, Edge Detector, and group repro commands.
+It does not render issue HTML or Markdown. External triage is collapsed by
+default and reduced to a plain-text summary plus allowlisted HTTPS links; it is
+explicitly issue commentary rather than analysis produced by this app.
+
+Rows receive a conservative report-fact heuristic:
+
+- **strong reported signal**: absolute reported change is at least 10%,
+  Test Quality is at most 0.05, and Edge Detector is false;
+- **high variance/noise risk**: Test Quality is at least 0.15 or Edge Detector
+  is true;
+- **review**: every other reported result.
+
+These categories are not statistical-significance claims. The thresholds live
+in `ChangeSetSignalHeuristic` and have focused tests.
+
+History enrichment is strictly on demand for one selected benchmark. The exact
+allowlisted report URL is fetched through the existing disk cache and parsed as
+text by `BenchmarkHistoryParser`; downloaded JavaScript is never executed. The
+imported runtime SHAs (and performance SHA when supplied by metadata) must each
+resolve to exactly one observation. Missing or ambiguous identities fail
+visibly rather than falling back to a date or nearby SHA. Successful analysis
+shows nearby and trailing median/IQR context, relative volatility, sample
+counts, and a conservative stable/noisy/insufficient boundary label. It also
+creates an existing benchmark-view URL carrying the exact run and A/B pins.
+
+Unauthenticated GitHub REST requests are rate limited. Configure an optional
+server-side token with `GitHub:Token` or the standard ASP.NET Core environment
+key `GitHub__Token`; it is applied only to the server's GitHub `HttpClient`.
+Request timeout is controlled by `GitHub:RequestTimeoutSeconds`:
+
+```json
+{
+  "GitHub": {
+    "Token": "",
+    "RequestTimeoutSeconds": 20
+  }
+}
+```
+
+The prototype does not fetch all benchmark histories, display the issue's
+static graph images, execute repro commands, query ADX, infer candidate commits,
+or claim a root cause. It supports only the current public autofiling Markdown
+shape and the known report host/run catalog. Schema changes, unsafe links,
+unsupported runs, and exact-match failures are surfaced as errors.
+
 ## Four-runtime same-build comparison
 
 Open **Four-runtime comparison** (`/compare-builds`) to compare imported results
@@ -265,6 +322,14 @@ running the app does not.
 - `Data/RegressionInvestigation.cs`, `HistoryTimeRange.cs`, and
   `HistoryPageState.cs` provide exact pin resolution, median/IQR windows,
   validated compare links, range resolution, and safe share-state parsing.
+- `Data/ChangeSetIssueParser.cs` treats autofiling issue Markdown as untrusted
+  data, preserves exact benchmark identities, and allowlists external links.
+- `Data/PerfAutofilingIssueClient.cs` performs server-side GitHub REST requests
+  with redirect rejection, timeout/token configuration, and explicit errors.
+- `Data/ChangeSetHistoryAnalysis.cs` maps one imported history URL into the
+  existing parser and robust investigation model without loading the catalog.
+- `Components/Pages/ChangeSet.razor` presents the grouped change set, evidence
+  drawer, report-fact heuristic, external triage summary, and exact deep links.
 - `Data/RollingVariabilityCalculator.cs` computes trailing rolling medians and
   IQR bands locally from primary-series values.
 - `Data/CachedPageClient.cs` and `DiskPageCache.cs` provide bounded-refresh
@@ -319,11 +384,15 @@ variables are expanded for configured paths.
 Small checked-in HTML fixtures and focused unit tests cover encoded benchmark
 names, primary-trace selection, optional errors, strict SHA matching, range
 selection, reverse/zero/duplicate pin cases, median/IQR windows, compare-link
-validation, and query-state round trips and rejection.
+validation, query-state round trips and rejection, autofiling input validation,
+hidden metadata, grouped Markdown tables, entity decoding, tricky parameters,
+safe-link rejection, repro extraction, external-triage sanitization, heuristic
+thresholds, exact history mapping, and missing/ambiguous SHA behavior.
 
 ```bash
 dotnet test tests/WasmBenchmarkHistory.Tests --filter 'Category!=Live'
 RUN_LIVE_SMOKE=1 dotnet test tests/WasmBenchmarkHistory.Tests --filter 'Category=Live'
+RUN_LIVE_CHANGE_SET_SMOKE=1 dotnet test tests/WasmBenchmarkHistory.Tests --filter 'FullyQualifiedName~LiveChangeSetSmokeTests'
 dotnet build WasmBenchmarkHistory.slnx
 ```
 
@@ -331,4 +400,6 @@ The live smoke test is read-only. It loads all three published indexes and one
 shared benchmark history from each run configuration. GitHub Actions runs the
 ordinary restore, Release build, tests, and publish validation for pull requests
 and pushes to `main`. A separate daily/manual workflow runs the network-dependent
-live smoke so upstream availability does not gate ordinary changes.
+live smoke so upstream availability does not gate ordinary changes. The
+change-set smoke separately imports public issue 79296 and analyzes one exact
+history on demand.
