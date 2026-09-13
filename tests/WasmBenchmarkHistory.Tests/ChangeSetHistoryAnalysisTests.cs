@@ -85,6 +85,31 @@ public sealed class ChangeSetHistoryAnalysisTests
         Assert.Contains("performance SHA", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Preview_SamplesAroundBoundaryAndRetainsExactMarkers()
+    {
+        var observations = Enumerable.Range(0, 120)
+            .Select(index => Observation(
+                index,
+                100 + Math.Sin(index / 5d) * 4,
+                index == 30 ? "1111111" : index == 90 ? "2222222" : $"{index + 100:x7}",
+                "aaaaaaa"))
+            .ToArray();
+
+        var preview = ChangeSetHistoryAnalyzer.CreatePreview(
+            History(observations),
+            "1111111",
+            "2222222",
+            "aaaaaaa",
+            maximumPoints: 30);
+
+        Assert.InRange(preview.Points.Count, 2, 32);
+        Assert.Single(preview.Points, point => point.IsBaseline);
+        Assert.Single(preview.Points, point => point.IsCompare);
+        Assert.Equal(observations[20].Timestamp, preview.Start);
+        Assert.Equal(observations[100].Timestamp, preview.End);
+    }
+
     private static BenchmarkHistory History(params BenchmarkObservation[] observations) =>
         new(
             "Example.Generic(String).Run(Path: \"a/b\")",

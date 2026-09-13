@@ -136,6 +136,7 @@
             @foreach (var visible in VisibleGroups)
             {
                 var group = visible.Group;
+                var groupState = GroupStateFor(group);
                 <details class="change-group" open>
                     <summary>
                         <span class="direction @DirectionClass(group.Direction)">
@@ -144,6 +145,28 @@
                         <strong>@group.Name</strong>
                         <span>@visible.Rows.Count row@(visible.Rows.Count == 1 ? null : "s")</span>
                     </summary>
+                    <div class="group-preview-controls">
+                        <p>
+                            Load real observations only for this family. Previews are sampled around
+                            the exact imported A/B boundary and cached by the existing history service.
+                        </p>
+                        <button type="button"
+                                disabled="@groupState.IsLoading"
+                                @onclick="() => LoadGroupPreviewsAsync(group)">
+                            @if (groupState.IsLoading)
+                            {
+                                <span>Loading @groupState.CompletedCount / @group.Rows.Count…</span>
+                            }
+                            else if (groupState.HasCompleted)
+                            {
+                                <span>Reload history previews</span>
+                            }
+                            else
+                            {
+                                <span>Load history previews</span>
+                            }
+                        </button>
+                    </div>
                     <div class="change-table-wrap">
                         <table>
                             <thead>
@@ -161,6 +184,7 @@
                                 @foreach (var row in visible.Rows)
                                 {
                                     var quality = ChangeSetSignalHeuristic.Classify(row);
+                                    var rowState = AnalysisFor(row);
                                     <tr>
                                         <th>
                                             <span class="row-display">@row.DisplayName</span>
@@ -170,11 +194,33 @@
                                         <td>@row.ReportedTest</td>
                                         <td>
                                             <div class="reported-change @DeltaClass(row)">
-                                                <ReportedChangeSparkline Ratio="@row.Ratio"
-                                                                         Direction="@group.Direction" />
+                                                @if (rowState.Preview is not null)
+                                                {
+                                                    <HistoryPreviewSparkline Preview="@rowState.Preview" />
+                                                }
+                                                else
+                                                {
+                                                    <ReportedChangeSparkline Ratio="@row.Ratio"
+                                                                             Direction="@group.Direction" />
+                                                }
                                                 <span>
                                                     <strong>@FormatPercent(row.PercentDelta)</strong>
                                                     <small>@row.Ratio.ToString("0.000×", CultureInfo.InvariantCulture)</small>
+                                                    @if (rowState.IsPreviewLoading)
+                                                    {
+                                                        <small class="preview-status">loading history…</small>
+                                                    }
+                                                    else if (rowState.PreviewError is not null)
+                                                    {
+                                                        <small class="preview-error"
+                                                               title="@rowState.PreviewError">history unavailable</small>
+                                                    }
+                                                    else if (rowState.Preview is not null)
+                                                    {
+                                                        <small class="preview-status">
+                                                            @rowState.Preview.Points.Count observations · A/B marked
+                                                        </small>
+                                                    }
                                                 </span>
                                             </div>
                                         </td>
@@ -334,6 +380,7 @@
     private int? _pendingIssueNumber;
     private SelectedEvidence? _selected;
     private readonly Dictionary<string, RowAnalysisState> _analysis = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, GroupPreviewState> _groupPreviews = new(StringComparer.Ordinal);
 
     private int ImprovementCount => _document?.Groups
         .Where(group => group.Direction == ChangeDirection.Improvement)
@@ -413,6 +460,7 @@
         _error = null;
         _selected = null;
         _analysis.Clear();
+        _groupPreviews.Clear();
         try
         {
             var reference = new PerfIssueReference(issueNumber);
@@ -515,6 +563,69 @@
         return state;
     }
 
+    private GroupPreviewState GroupStateFor(ChangeSetGroup group)
+    {
+        var key = GroupKey(group);
+        if (!_groupPreviews.TryGetValue(key, out var state))
+        {
+            state = new GroupPreviewState();
+            _groupPreviews.Add(key, state);
+        }
+
+        return state;
+    }
+
+    private async Task LoadGroupPreviewsAsync(ChangeSetGroup group)
+    {
+        var groupState = GroupStateFor(group);
+        if (groupState.IsLoading)
+        {
+            return;
+        }
+
+        groupState.IsLoading = true;
+        groupState.CompletedCount = 0;
+        using var concurrency = new SemaphoreSlim(3);
+        var tasks = group.Rows.Select(async row =>
+        {
+            await concurrency.WaitAsync();
+            try
+            {
+                var state = AnalysisFor(row);
+                state.IsPreviewLoading = true;
+                state.PreviewError = null;
+                try
+                {
+                    var history = await GetHistoryAsync(row, state);
+                    state.Preview = ChangeSetHistoryAnalyzer.CreatePreview(
+                        history,
+                        group.Run.BaselineRuntimeSha,
+                        group.Run.CompareRuntimeSha,
+                        _document?.Metadata.PerformanceSha);
+                }
+                catch (BenchmarkDataException exception)
+                {
+                    state.Preview = null;
+                    state.PreviewError = exception.Message;
+                }
+                finally
+                {
+                    state.IsPreviewLoading = false;
+                    groupState.CompletedCount++;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            finally
+            {
+                concurrency.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+        groupState.IsLoading = false;
+        groupState.HasCompleted = true;
+    }
+
     private async Task AnalyzeHistoryAsync(SelectedEvidence selected)
     {
         var state = AnalysisFor(selected.Row);
@@ -523,14 +634,7 @@
         state.Result = null;
         try
         {
-            var history = await HistoryService.LoadImportedHistoryAsync(selected.Row.HistoryUri);
-            if (!history.Benchmark.Equals(selected.Row.Benchmark, StringComparison.Ordinal))
-            {
-                throw new BenchmarkDataException(
-                    BenchmarkDataError.UnknownBenchmark,
-                    "The imported benchmark identity did not exactly match the history page.");
-            }
-
+            var history = await GetHistoryAsync(selected.Row, state);
             state.Result = ChangeSetHistoryAnalyzer.Analyze(
                 history,
                 selected.Group.Run.BaselineRuntimeSha,
@@ -545,6 +649,40 @@
         {
             state.IsLoading = false;
         }
+    }
+
+    private async Task<BenchmarkHistory> GetHistoryAsync(
+        ChangeSetBenchmark row,
+        RowAnalysisState state)
+    {
+        if (state.History is not null)
+        {
+            return state.History;
+        }
+
+        state.LoadTask ??= LoadAndValidateHistoryAsync(row);
+        try
+        {
+            state.History = await state.LoadTask;
+            return state.History;
+        }
+        finally
+        {
+            state.LoadTask = null;
+        }
+    }
+
+    private async Task<BenchmarkHistory> LoadAndValidateHistoryAsync(ChangeSetBenchmark row)
+    {
+        var history = await HistoryService.LoadImportedHistoryAsync(row.HistoryUri);
+        if (!history.Benchmark.Equals(row.Benchmark, StringComparison.Ordinal))
+        {
+            throw new BenchmarkDataException(
+                BenchmarkDataError.UnknownBenchmark,
+                "The imported benchmark identity did not exactly match the history page.");
+        }
+
+        return history;
     }
 
     private static RenderFragment ContextCard(
@@ -576,6 +714,9 @@
         _ => "review"
     };
 
+    private static string GroupKey(ChangeSetGroup group) =>
+        $"{group.Name}\n{group.Run.BaselineRuntimeSha}\n{group.Run.CompareRuntimeSha}";
+
     private sealed record VisibleGroup(
         ChangeSetGroup Group,
         IReadOnlyList<ChangeSetBenchmark> Rows);
@@ -586,8 +727,20 @@
 
     private sealed class RowAnalysisState
     {
+        public BenchmarkHistory? History { get; set; }
+        public Task<BenchmarkHistory>? LoadTask { get; set; }
+        public bool IsPreviewLoading { get; set; }
+        public ChangeSetHistoryPreview? Preview { get; set; }
+        public string? PreviewError { get; set; }
         public bool IsLoading { get; set; }
         public string? Error { get; set; }
         public ChangeSetHistoryAnalysis? Result { get; set; }
+    }
+
+    private sealed class GroupPreviewState
+    {
+        public bool IsLoading { get; set; }
+        public bool HasCompleted { get; set; }
+        public int CompletedCount { get; set; }
     }
 }
