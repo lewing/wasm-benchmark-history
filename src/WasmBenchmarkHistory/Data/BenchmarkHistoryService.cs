@@ -73,4 +73,16 @@ public sealed class BenchmarkHistoryService(
 
         return await Task.WhenAll(tasks);
     }
+
+    public async Task<BenchmarkHistory> LoadImportedHistoryAsync(
+        Uri historyUri,
+        CancellationToken cancellationToken = default)
+    {
+        var target = ImportedHistoryTarget.Parse(historyUri);
+        var html = await pageClient.GetStringAsync(
+            target.HistoryUri,
+            TimeSpan.FromMinutes(_options.HistoryCacheMinutes),
+            cancellationToken);
+        return historyParser.Parse(target.Benchmark, target.Run, html);
+    }
 }

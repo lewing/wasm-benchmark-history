@@ -1,0 +1,45 @@
+.reported-sparkline {
+    display: block;
+    height: 30px;
+    min-width: 72px;
+    overflow: visible;
+    width: 72px;
+}
+
+.sparkline-guide {
+    stroke: rgb(142 155 177 / 25%);
+    stroke-dasharray: 2 2;
+    stroke-width: 1;
+}
+
+.sparkline-trend {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+.reported-sparkline.improvement .sparkline-trend,
+.reported-sparkline.improvement .sparkline-point.compare {
+    stroke: #68e6bd;
+}
+
+.reported-sparkline.regression .sparkline-trend,
+.reported-sparkline.regression .sparkline-point.compare {
+    stroke: #ff9da5;
+}
+
+.sparkline-point {
+    fill: #0c1729;
+    stroke-width: 2;
+}
+
+.sparkline-point.baseline {
+    stroke: #8e9bb1;
+}
+
+text {
+    fill: #71809b;
+    font-size: 5px;
+    font-weight: 700;
+}

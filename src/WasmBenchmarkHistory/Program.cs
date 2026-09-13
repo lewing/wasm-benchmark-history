@@ -23,9 +23,12 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.Configure<BenchmarkDataOptions>(
     builder.Configuration.GetSection(BenchmarkDataOptions.SectionName));
+builder.Services.Configure<GitHubIssueOptions>(
+    builder.Configuration.GetSection(GitHubIssueOptions.SectionName));
 builder.Services.AddSingleton<DiskPageCache>();
 builder.Services.AddSingleton<BenchmarkIndexParser>();
 builder.Services.AddSingleton<BenchmarkHistoryParser>();
+builder.Services.AddSingleton<ChangeSetIssueParser>();
 builder.Services.AddHttpClient<CachedPageClient>((services, client) =>
 {
     var options = services.GetRequiredService<
@@ -34,6 +37,17 @@ builder.Services.AddHttpClient<CachedPageClient>((services, client) =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("wasm-benchmark-history/1.0");
 });
 builder.Services.AddScoped<BenchmarkHistoryService>();
+builder.Services.AddHttpClient<PerfAutofilingIssueClient>((services, client) =>
+{
+    var options = services.GetRequiredService<
+        Microsoft.Extensions.Options.IOptions<GitHubIssueOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("wasm-benchmark-history/1.0");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+}).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = false
+});
 builder.Services.AddSingleton<BuildSnapshotStore>();
 
 var app = builder.Build();

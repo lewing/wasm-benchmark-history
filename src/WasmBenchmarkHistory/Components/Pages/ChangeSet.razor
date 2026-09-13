@@ -1,0 +1,593 @@
+@page "/change-set"
+@inject PerfAutofilingIssueClient IssueClient
+@inject ChangeSetIssueParser IssueParser
+@inject BenchmarkHistoryService HistoryService
+@inject NavigationManager Navigation
+
+<PageTitle>Autofiled performance change set</PageTitle>
+
+<section class="change-hero">
+    <p class="eyebrow">AUTOFILING PROTOTYPE</p>
+    <h1>Investigate a reported performance change set.</h1>
+    <p>
+        Import structured facts from a public <strong>dotnet/perf-autofiling-issues</strong>
+        issue, then inspect individual histories on demand. Reported values and external
+        commentary remain distinct from this app's conservative local context.
+    </p>
+</section>
+
+<form class="issue-import" @onsubmit="ImportAsync" @onsubmit:preventDefault>
+    <label for="issue-reference">Public issue</label>
+    <div>
+        <input id="issue-reference"
+               @bind="_issueInput"
+               placeholder="79296, dotnet/perf-autofiling-issues#79296, or issue URL"
+               autocomplete="off" />
+        <button class="primary-button" type="submit" disabled="@_isLoading">
+            @(_isLoading ? "Importing…" : "Import change set")
+        </button>
+    </div>
+    <small>Fetched server-side through the GitHub REST API. The optional token is never sent to the browser.</small>
+</form>
+
+@if (_error is not null)
+{
+    <div class="change-error" role="alert">
+        <strong>Change set could not be loaded.</strong>
+        <span>@_error</span>
+    </div>
+}
+
+@if (_document is not null)
+{
+    <section class="issue-summary" aria-labelledby="issue-title">
+        <div>
+            <p class="eyebrow">ISSUE #@_document.IssueNumber · @_document.State.ToUpperInvariant()</p>
+            <h2 id="issue-title">@_document.Title</h2>
+            <p>
+                @_document.Metadata.Repository · @_document.Metadata.Branch ·
+                @_document.Metadata.Architecture · @_document.Metadata.OperatingSystem ·
+                @_document.Metadata.Queue
+            </p>
+        </div>
+        <a href="@_document.IssueUri" target="_blank" rel="noopener noreferrer">
+            Open source issue <span aria-hidden="true">↗</span>
+        </a>
+    </section>
+
+    <section class="change-stats" aria-label="Change set summary">
+        <div><strong>@_document.BenchmarkCount</strong><span>reported benchmarks</span></div>
+        <div><strong>@_document.Groups.Count</strong><span>benchmark families</span></div>
+        <div><strong>@ImprovementCount</strong><span>improvements</span></div>
+        <div><strong>@RegressionCount</strong><span>regressions</span></div>
+        <div><strong>@StrongCount</strong><span>strong reported signals</span></div>
+    </section>
+
+    <section class="run-provenance">
+        <div>
+            <span>Run type</span>
+            <strong>@string.Join(", ", _document.Metadata.Configurations)</strong>
+            <small>
+                @(_document.Metadata.RegressionDate?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                    ?? "date unavailable")
+            </small>
+        </div>
+        @foreach (var run in DistinctRuns)
+        {
+            <div class="runtime-range">
+                <span>Runtime A → B</span>
+                <strong>
+                    <code title="@run.BaselineRuntimeSha">@ShortSha(run.BaselineRuntimeSha)</code>
+                    <span aria-hidden="true">→</span>
+                    <code title="@run.CompareRuntimeSha">@ShortSha(run.CompareRuntimeSha)</code>
+                </strong>
+                <a href="@run.RuntimeDiffUri" target="_blank" rel="noopener noreferrer">Open runtime diff ↗</a>
+            </div>
+        }
+    </section>
+
+    <section class="heuristic-note">
+        <strong>Heuristic labels, not statistical significance.</strong>
+        <p>
+            Classification uses only the report's ratio, Test Quality, and Edge Detector fields:
+            strong requires at least @ChangeSetSignalHeuristic.StrongMinimumMagnitudePercent.ToString("0", CultureInfo.InvariantCulture)%
+            magnitude, quality ≤ @ChangeSetSignalHeuristic.StrongMaximumReportedQuality.ToString("0.00", CultureInfo.InvariantCulture),
+            and Edge Detector false; quality ≥ @ChangeSetSignalHeuristic.HighVarianceReportedQuality.ToString("0.00", CultureInfo.InvariantCulture)
+            or Edge Detector true is marked as variance/noise risk. Everything else requires review.
+        </p>
+    </section>
+
+    <section class="change-controls" aria-label="Benchmark filters">
+        <label>
+            Filter benchmarks
+            <input type="search"
+                   @bind="_search"
+                   @bind:event="oninput"
+                   @bind:after="OnFilterChanged"
+                   placeholder="Exact family, benchmark, or parameter text" />
+        </label>
+        <label>
+            Sort rows
+            <select @bind="_sort" @bind:after="OnFilterChanged">
+                <option value="@ChangeSetSort.Magnitude">Magnitude</option>
+                <option value="@ChangeSetSort.Name">Name</option>
+                <option value="@ChangeSetSort.ReportedQuality">Reported quality</option>
+            </select>
+        </label>
+        <label>
+            Signal label
+            <select @bind="_qualityFilter" @bind:after="OnFilterChanged">
+                <option value="@ChangeSetQualityFilter.All">All labels</option>
+                <option value="@ChangeSetQualityFilter.Strong">Strong reported signal</option>
+                <option value="@ChangeSetQualityFilter.Review">Review</option>
+                <option value="@ChangeSetQualityFilter.NoiseRisk">High variance/noise risk</option>
+            </select>
+        </label>
+        <span class="visible-count">@VisibleBenchmarkCount of @_document.BenchmarkCount rows</span>
+    </section>
+
+    @if (VisibleGroups.Count == 0)
+    {
+        <p class="empty-results">No reported benchmark matches the current filters.</p>
+    }
+    else
+    {
+        <section class="change-groups" aria-label="Reported benchmark families">
+            @foreach (var visible in VisibleGroups)
+            {
+                var group = visible.Group;
+                <details class="change-group" open>
+                    <summary>
+                        <span class="direction @DirectionClass(group.Direction)">
+                            @group.Direction
+                        </span>
+                        <strong>@group.Name</strong>
+                        <span>@visible.Rows.Count row@(visible.Rows.Count == 1 ? null : "s")</span>
+                    </summary>
+                    <div class="change-table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Benchmark</th>
+                                    <th>Baseline</th>
+                                    <th>Test</th>
+                                    <th>Reported A→B</th>
+                                    <th>Reported quality</th>
+                                    <th>Availability</th>
+                                    <th><span class="visually-hidden">Actions</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in visible.Rows)
+                                {
+                                    var quality = ChangeSetSignalHeuristic.Classify(row);
+                                    <tr>
+                                        <th>
+                                            <span class="row-display">@row.DisplayName</span>
+                                            <code>@row.Benchmark</code>
+                                        </th>
+                                        <td>@row.ReportedBaseline</td>
+                                        <td>@row.ReportedTest</td>
+                                        <td>
+                                            <div class="reported-change @DeltaClass(row)">
+                                                <ReportedChangeSparkline Ratio="@row.Ratio"
+                                                                         Direction="@group.Direction" />
+                                                <span>
+                                                    <strong>@FormatPercent(row.PercentDelta)</strong>
+                                                    <small>@row.Ratio.ToString("0.000×", CultureInfo.InvariantCulture)</small>
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="quality-badge @QualityClass(quality)">
+                                                @ChangeSetSignalHeuristic.DisplayName(quality)
+                                            </span>
+                                            <small>
+                                                Test Quality @(row.TestQuality?.ToString("0.00", CultureInfo.InvariantCulture) ?? "unavailable")
+                                                · Edge @(row.EdgeDetector?.ToString() ?? "unavailable")
+                                            </small>
+                                        </td>
+                                        <td>
+                                            <span class="availability-list">
+                                                <span class="available">history</span>
+                                                <span class="@(row.SourceUri is null ? "unavailable" : "available")">source</span>
+                                                <span class="@(row.ReportUri is null ? "unavailable" : "available")">report</span>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button class="evidence-button"
+                                                    type="button"
+                                                    @onclick="() => SelectEvidence(group, row)">
+                                                Evidence
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            }
+        </section>
+    }
+
+    @if (_document.ExternalTriage is { } triage)
+    {
+        <details class="external-triage">
+            <summary>External triage — issue commentary, not this app's analysis</summary>
+            <p>@triage.Summary</p>
+            <small>Posted by @triage.Author on @triage.CreatedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture).</small>
+            @if (triage.Links.Count > 0)
+            {
+                <ul>
+                    @foreach (var link in triage.Links)
+                    {
+                        <li><a href="@link.Uri" target="_blank" rel="noopener noreferrer">@link.Text ↗</a></li>
+                    }
+                </ul>
+            }
+        </details>
+    }
+}
+
+@if (_selected is not null)
+{
+    var selected = _selected;
+    var analysisState = AnalysisFor(selected.Row);
+    <aside class="evidence-drawer"
+           role="dialog"
+           aria-modal="true"
+           aria-labelledby="evidence-title"
+           tabindex="0"
+           @onkeydown="OnDrawerKeyDown">
+        <div class="drawer-header">
+            <div>
+                <p class="eyebrow">BENCHMARK EVIDENCE</p>
+                <h2 id="evidence-title">@selected.Row.DisplayName</h2>
+            </div>
+            <button type="button"
+                    aria-label="Close evidence"
+                    autofocus
+                    @onclick="CloseEvidence">×</button>
+        </div>
+        <code class="exact-identity">@selected.Row.Benchmark</code>
+
+        <dl>
+            <div><dt>Reported baseline</dt><dd>@selected.Row.ReportedBaseline</dd></div>
+            <div><dt>Reported test</dt><dd>@selected.Row.ReportedTest</dd></div>
+            <div><dt>Reported delta</dt><dd>@FormatPercent(selected.Row.PercentDelta)</dd></div>
+            <div><dt>Runtime A</dt><dd><code>@selected.Group.Run.BaselineRuntimeSha</code></dd></div>
+            <div><dt>Runtime B</dt><dd><code>@selected.Group.Run.CompareRuntimeSha</code></dd></div>
+        </dl>
+
+        <div class="evidence-links">
+            <a href="@selected.Row.HistoryUri" target="_blank" rel="noopener noreferrer">History ↗</a>
+            @if (selected.Row.SourceUri is not null)
+            {
+                <a href="@selected.Row.SourceUri" target="_blank" rel="noopener noreferrer">Source ↗</a>
+            }
+            @if (selected.Row.ReportUri is not null)
+            {
+                <a href="@selected.Row.ReportUri" target="_blank" rel="noopener noreferrer">Test report ↗</a>
+            }
+            <a href="@selected.Group.Run.RuntimeDiffUri" target="_blank" rel="noopener noreferrer">Runtime diff ↗</a>
+        </div>
+
+        @if (selected.Group.ReproCommand is not null)
+        {
+            <h3>Group repro command</h3>
+            <pre><code>@selected.Group.ReproCommand</code></pre>
+        }
+
+        <section class="history-analysis">
+            <div class="analysis-heading">
+                <div>
+                    <h3>Local history context</h3>
+                    <p>Fetched only for this benchmark; downloaded JavaScript is parsed as text and never executed.</p>
+                </div>
+                <button class="primary-button"
+                        type="button"
+                        disabled="@analysisState.IsLoading"
+                        @onclick="() => AnalyzeHistoryAsync(selected)">
+                    @(analysisState.IsLoading ? "Analyzing…" : "Analyze history")
+                </button>
+            </div>
+
+            @if (analysisState.Error is not null)
+            {
+                <p class="analysis-error" role="alert">@analysisState.Error</p>
+            }
+            else if (analysisState.Result is { } analysis)
+            {
+                <p class="boundary @analysis.Assessment.ToString().ToLowerInvariant()">
+                    Apparent boundary: <strong>@analysis.Assessment.ToString().ToLowerInvariant()</strong>
+                </p>
+                <div class="context-grid">
+                    @ContextCard("Baseline A", analysis.Baseline)
+                    @ContextCard("Compare B", analysis.Compare)
+                </div>
+                <p class="analysis-caveat">
+                    Local medians, IQR, and volatility are descriptive context only. This does not
+                    establish statistical significance or identify a cause.
+                </p>
+                <a class="benchmark-link" href="@analysis.BenchmarkViewUri">
+                    Open in benchmark view with exact A/B pins →
+                </a>
+            }
+        </section>
+    </aside>
+    <button class="drawer-backdrop"
+            type="button"
+            aria-label="Close evidence"
+            @onclick="CloseEvidence"></button>
+}
+
+@code {
+    private string _issueInput = string.Empty;
+    private ChangeSetDocument? _document;
+    private string _search = string.Empty;
+    private ChangeSetSort _sort = ChangeSetSort.Magnitude;
+    private ChangeSetQualityFilter _qualityFilter = ChangeSetQualityFilter.All;
+    private string? _error;
+    private bool _isLoading;
+    private bool _isInteractive;
+    private int? _pendingIssueNumber;
+    private SelectedEvidence? _selected;
+    private readonly Dictionary<string, RowAnalysisState> _analysis = new(StringComparer.Ordinal);
+
+    private int ImprovementCount => _document?.Groups
+        .Where(group => group.Direction == ChangeDirection.Improvement)
+        .Sum(group => group.Rows.Count) ?? 0;
+
+    private int RegressionCount => _document?.Groups
+        .Where(group => group.Direction == ChangeDirection.Regression)
+        .Sum(group => group.Rows.Count) ?? 0;
+
+    private int StrongCount => _document?.Groups
+        .SelectMany(group => group.Rows)
+        .Count(row => ChangeSetSignalHeuristic.Classify(row)
+            == ReportedSignalQuality.StrongReportedSignal) ?? 0;
+
+    private IReadOnlyList<ChangeSetRunInformation> DistinctRuns =>
+        _document?.Groups
+            .Select(group => group.Run)
+            .DistinctBy(run => (run.BaselineRuntimeSha, run.CompareRuntimeSha))
+            .ToArray() ?? [];
+
+    private IReadOnlyList<VisibleGroup> VisibleGroups =>
+        _document?.Groups
+            .Select(group => new VisibleGroup(group, SortRows(group.Rows.Where(IsVisible)).ToArray()))
+            .Where(group => group.Rows.Count > 0)
+            .ToArray() ?? [];
+
+    private int VisibleBenchmarkCount => VisibleGroups.Sum(group => group.Rows.Count);
+
+    protected override void OnInitialized()
+    {
+        var state = ChangeSetPageStateCodec.Parse(Navigation.Uri);
+        _search = state.Search;
+        _sort = state.Sort;
+        _qualityFilter = state.Quality;
+        if (state.IssueNumber is { } issueNumber)
+        {
+            _issueInput = issueNumber.ToString(CultureInfo.InvariantCulture);
+            _pendingIssueNumber = issueNumber;
+            _isLoading = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _isInteractive = true;
+        if (_pendingIssueNumber is { } issueNumber)
+        {
+            _pendingIssueNumber = null;
+            await LoadAsync(issueNumber);
+            StateHasChanged();
+        }
+    }
+
+    private async Task ImportAsync()
+    {
+        _error = null;
+        try
+        {
+            var reference = PerfIssueReference.Parse(_issueInput);
+            await LoadAsync(reference.Number);
+        }
+        catch (PerfIssueException exception)
+        {
+            _document = null;
+            _error = exception.Message;
+        }
+    }
+
+    private async Task LoadAsync(int issueNumber)
+    {
+        _isLoading = true;
+        _error = null;
+        _selected = null;
+        _analysis.Clear();
+        try
+        {
+            var reference = new PerfIssueReference(issueNumber);
+            var payload = await IssueClient.LoadAsync(reference);
+            _document = IssueParser.Parse(payload);
+            _issueInput = issueNumber.ToString(CultureInfo.InvariantCulture);
+            UpdateUrl();
+        }
+        catch (Exception exception) when (
+            exception is PerfIssueException or BenchmarkDataException)
+        {
+            _document = null;
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private bool IsVisible(ChangeSetBenchmark row)
+    {
+        var search = _search.Trim();
+        var matchesSearch = search.Length == 0
+            || row.Benchmark.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || row.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase);
+        if (!matchesSearch)
+        {
+            return false;
+        }
+
+        var quality = ChangeSetSignalHeuristic.Classify(row);
+        return _qualityFilter switch
+        {
+            ChangeSetQualityFilter.Strong =>
+                quality == ReportedSignalQuality.StrongReportedSignal,
+            ChangeSetQualityFilter.Review =>
+                quality == ReportedSignalQuality.Review,
+            ChangeSetQualityFilter.NoiseRisk =>
+                quality == ReportedSignalQuality.HighVarianceOrNoiseRisk,
+            _ => true
+        };
+    }
+
+    private IEnumerable<ChangeSetBenchmark> SortRows(IEnumerable<ChangeSetBenchmark> rows) =>
+        _sort switch
+        {
+            ChangeSetSort.Name => rows.OrderBy(row => row.Benchmark, StringComparer.OrdinalIgnoreCase),
+            ChangeSetSort.ReportedQuality => rows
+                .OrderBy(row => row.TestQuality ?? double.PositiveInfinity)
+                .ThenByDescending(row => Math.Abs(row.PercentDelta)),
+            _ => rows
+                .OrderByDescending(row => Math.Abs(row.PercentDelta))
+                .ThenBy(row => row.Benchmark, StringComparer.OrdinalIgnoreCase)
+        };
+
+    private void OnFilterChanged() => UpdateUrl();
+
+    private void UpdateUrl()
+    {
+        if (!_isInteractive)
+        {
+            return;
+        }
+
+        var uri = ChangeSetPageStateCodec.ToRelativeUri(new ChangeSetPageState(
+            _document?.IssueNumber,
+            _search,
+            _sort,
+            _qualityFilter));
+        var absolute = Navigation.ToAbsoluteUri(uri).AbsoluteUri;
+        if (!Navigation.Uri.Equals(absolute, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo(uri, replace: true);
+        }
+    }
+
+    private void SelectEvidence(ChangeSetGroup group, ChangeSetBenchmark row) =>
+        _selected = new SelectedEvidence(group, row);
+
+    private void CloseEvidence() => _selected = null;
+
+    private void OnDrawerKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            CloseEvidence();
+        }
+    }
+
+    private RowAnalysisState AnalysisFor(ChangeSetBenchmark row)
+    {
+        var key = row.HistoryUri.AbsoluteUri;
+        if (!_analysis.TryGetValue(key, out var state))
+        {
+            state = new RowAnalysisState();
+            _analysis.Add(key, state);
+        }
+
+        return state;
+    }
+
+    private async Task AnalyzeHistoryAsync(SelectedEvidence selected)
+    {
+        var state = AnalysisFor(selected.Row);
+        state.IsLoading = true;
+        state.Error = null;
+        state.Result = null;
+        try
+        {
+            var history = await HistoryService.LoadImportedHistoryAsync(selected.Row.HistoryUri);
+            if (!history.Benchmark.Equals(selected.Row.Benchmark, StringComparison.Ordinal))
+            {
+                throw new BenchmarkDataException(
+                    BenchmarkDataError.UnknownBenchmark,
+                    "The imported benchmark identity did not exactly match the history page.");
+            }
+
+            state.Result = ChangeSetHistoryAnalyzer.Analyze(
+                history,
+                selected.Group.Run.BaselineRuntimeSha,
+                selected.Group.Run.CompareRuntimeSha,
+                _document?.Metadata.PerformanceSha);
+        }
+        catch (BenchmarkDataException exception)
+        {
+            state.Error = exception.Message;
+        }
+        finally
+        {
+            state.IsLoading = false;
+        }
+    }
+
+    private static RenderFragment ContextCard(
+        string title,
+        HistoryContextPoint context) => @<article class="context-card">
+            <h4>@title</h4>
+            <strong>@context.Observation.Value.ToString("N3", CultureInfo.InvariantCulture)</strong>
+            <span>@context.Observation.Timestamp.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
+            <dl>
+                <div><dt>Nearby median</dt><dd>@context.Nearby.Median.ToString("N3", CultureInfo.InvariantCulture)</dd></div>
+                <div><dt>Nearby IQR</dt><dd>@context.Nearby.InterquartileRange.ToString("N3", CultureInfo.InvariantCulture)</dd></div>
+                <div><dt>Trailing median</dt><dd>@context.Trailing.Median.ToString("N3", CultureInfo.InvariantCulture)</dd></div>
+                <div><dt>Relative volatility</dt><dd>@(context.RelativeVolatilityPercent?.ToString("0.00'%'", CultureInfo.InvariantCulture) ?? "unavailable")</dd></div>
+                <div><dt>Samples</dt><dd>@context.Trailing.Count trailing / @context.Nearby.Count nearby</dd></div>
+            </dl>
+        </article>;
+
+    private static string ShortSha(string sha) => sha[..Math.Min(12, sha.Length)];
+    private static string FormatPercent(double value) =>
+        value.ToString("+0.0;-0.0;0.0", CultureInfo.InvariantCulture) + "%";
+    private static string DeltaClass(ChangeSetBenchmark row) =>
+        row.PercentDelta < 0 ? "improvement-value" : "regression-value";
+    private static string DirectionClass(ChangeDirection direction) =>
+        direction == ChangeDirection.Improvement ? "improvement" : "regression";
+    private static string QualityClass(ReportedSignalQuality quality) => quality switch
+    {
+        ReportedSignalQuality.StrongReportedSignal => "strong",
+        ReportedSignalQuality.HighVarianceOrNoiseRisk => "noise",
+        _ => "review"
+    };
+
+    private sealed record VisibleGroup(
+        ChangeSetGroup Group,
+        IReadOnlyList<ChangeSetBenchmark> Rows);
+
+    private sealed record SelectedEvidence(
+        ChangeSetGroup Group,
+        ChangeSetBenchmark Row);
+
+    private sealed class RowAnalysisState
+    {
+        public bool IsLoading { get; set; }
+        public string? Error { get; set; }
+        public ChangeSetHistoryAnalysis? Result { get; set; }
+    }
+}

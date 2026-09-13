@@ -1,0 +1,32 @@
+<svg class="reported-sparkline @DirectionClass"
+     viewBox="0 0 64 28"
+     role="img"
+     aria-label="@AccessibleLabel">
+    <title>@AccessibleLabel</title>
+    <line class="sparkline-guide" x1="5" y1="14" x2="59" y2="14"></line>
+    <polyline class="sparkline-trend"
+              points="@($"7,{BaselineY:0.##} 57,{CompareY:0.##}")"></polyline>
+    <circle class="sparkline-point baseline" cx="7" cy="@BaselineY" r="2.5"></circle>
+    <circle class="sparkline-point compare" cx="57" cy="@CompareY" r="2.5"></circle>
+    <text x="4" y="26">A</text>
+    <text x="54" y="26">B</text>
+</svg>
+
+@code {
+    [Parameter, EditorRequired]
+    public double Ratio { get; set; }
+
+    [Parameter, EditorRequired]
+    public ChangeDirection Direction { get; set; }
+
+    private const double BaselineY = 12;
+
+    private double CompareY =>
+        Math.Clamp(BaselineY + (1 - Ratio) * 28, 3, 21);
+
+    private string DirectionClass =>
+        Direction == ChangeDirection.Improvement ? "improvement" : "regression";
+
+    private string AccessibleLabel =>
+        $"Reported A to B change: {(Ratio - 1) * 100:+0.0;-0.0;0.0} percent, ratio {Ratio:0.000}.";
+}
