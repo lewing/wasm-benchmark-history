@@ -346,6 +346,16 @@ td small {
     color: #ff9da5;
 }
 
+.reported-change {
+    align-items: center;
+    display: flex;
+    gap: .45rem;
+}
+
+.reported-change > span {
+    min-width: 58px;
+}
+
 .evidence-button {
     background: transparent;
     border: 1px solid var(--line-strong);

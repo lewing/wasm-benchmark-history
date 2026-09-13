@@ -151,7 +151,7 @@
                                     <th>Benchmark</th>
                                     <th>Baseline</th>
                                     <th>Test</th>
-                                    <th>Delta / ratio</th>
+                                    <th>Reported A→B</th>
                                     <th>Reported quality</th>
                                     <th>Availability</th>
                                     <th><span class="visually-hidden">Actions</span></th>
@@ -168,9 +168,15 @@
                                         </th>
                                         <td>@row.ReportedBaseline</td>
                                         <td>@row.ReportedTest</td>
-                                        <td class="@DeltaClass(row)">
-                                            <strong>@FormatPercent(row.PercentDelta)</strong>
-                                            <small>@row.Ratio.ToString("0.000×", CultureInfo.InvariantCulture)</small>
+                                        <td>
+                                            <div class="reported-change @DeltaClass(row)">
+                                                <ReportedChangeSparkline Ratio="@row.Ratio"
+                                                                         Direction="@group.Direction" />
+                                                <span>
+                                                    <strong>@FormatPercent(row.PercentDelta)</strong>
+                                                    <small>@row.Ratio.ToString("0.000×", CultureInfo.InvariantCulture)</small>
+                                                </span>
+                                            </div>
                                         </td>
                                         <td>
                                             <span class="quality-badge @QualityClass(quality)">
