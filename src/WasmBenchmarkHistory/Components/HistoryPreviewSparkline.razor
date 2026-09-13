@@ -1,0 +1,59 @@
+@using System.Globalization
+
+<svg class="history-preview-sparkline"
+     viewBox="0 0 @Width @Height"
+     role="img"
+     aria-label="@AccessibleLabel">
+    <title>@AccessibleLabel</title>
+    <line class="preview-guide" x1="@Padding" y1="@BaselineY" x2="@(Width - Padding)" y2="@BaselineY"></line>
+    <polyline class="preview-trend" points="@Polyline"></polyline>
+    @foreach (var marker in Markers)
+    {
+        <circle class="preview-marker @(marker.Point.IsBaseline ? "baseline" : "compare")"
+                cx="@marker.X"
+                cy="@marker.Y"
+                r="3"></circle>
+    }
+</svg>
+
+@code {
+    private const double Width = 132;
+    private const double Height = 34;
+    private const double Padding = 4;
+
+    [Parameter, EditorRequired]
+    public ChangeSetHistoryPreview Preview { get; set; } = default!;
+
+    private double Minimum => Preview.Points.Min(point => point.Value);
+    private double Maximum => Preview.Points.Max(point => point.Value);
+    private double BaselineY => Coordinate(Preview.Points.Single(point => point.IsBaseline).Value);
+
+    private string Polyline => string.Join(
+        ' ',
+        Preview.Points.Select((point, index) =>
+            $"{X(index).ToString("0.##", CultureInfo.InvariantCulture)},{Coordinate(point.Value).ToString("0.##", CultureInfo.InvariantCulture)}"));
+
+    private IReadOnlyList<(ChangeSetHistoryPreviewPoint Point, double X, double Y)> Markers =>
+        Preview.Points
+            .Select((point, index) => (Point: point, X: X(index), Y: Coordinate(point.Value)))
+            .Where(marker => marker.Point.IsBaseline || marker.Point.IsCompare)
+            .ToArray();
+
+    private string AccessibleLabel =>
+        $"History preview with {Preview.Points.Count} observations from "
+        + $"{Preview.Start:yyyy-MM-dd} through {Preview.End:yyyy-MM-dd}; "
+        + "baseline A and comparison B are marked.";
+
+    private double X(int index) =>
+        Preview.Points.Count == 1
+            ? Width / 2
+            : Padding + (Width - Padding * 2) * index / (Preview.Points.Count - 1);
+
+    private double Coordinate(double value)
+    {
+        var range = Maximum - Minimum;
+        return range == 0
+            ? Height / 2
+            : Padding + (Maximum - value) / range * (Height - Padding * 2);
+    }
+}

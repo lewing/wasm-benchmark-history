@@ -1,0 +1,33 @@
+.history-preview-sparkline {
+    display: block;
+    height: 38px;
+    min-width: 132px;
+    width: 132px;
+}
+
+.preview-guide {
+    stroke: rgb(142 155 177 / 24%);
+    stroke-dasharray: 2 2;
+    stroke-width: 1;
+}
+
+.preview-trend {
+    fill: none;
+    stroke: var(--accent);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.5;
+}
+
+.preview-marker {
+    fill: #0c1729;
+    stroke-width: 2;
+}
+
+.preview-marker.baseline {
+    stroke: #f4a340;
+}
+
+.preview-marker.compare {
+    stroke: #68e6bd;
+}
