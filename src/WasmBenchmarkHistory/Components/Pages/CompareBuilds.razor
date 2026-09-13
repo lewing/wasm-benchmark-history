@@ -7,15 +7,15 @@
     <p class="eyebrow">SAME-BUILD MEASUREMENTS</p>
     <h1>Four Wasm runtime modes</h1>
     <p>Compare Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R.
-        These imported snapshots are separate from <a href="/">historical trends</a>;
-        no earlier ColdStart runs are mixed in.</p>
+        Snapshot-to-snapshot calculations stay within one build. The same exact observations
+        can also augment <a href="/">historical trends</a>; earlier ColdStart runs are never mixed in.</p>
 </section>
 
 <label for="build-select">Build</label>
 <select id="build-select" value="@_buildId" @onchange="ChangeBuildAsync">
     @foreach (var id in _buildIds)
     {
-        <option value="@id">@id</option>
+        <option value="@id">@BuildLabel(id)</option>
     }
 </select>
 
@@ -30,6 +30,9 @@ else if (_result is null)
 else
 {
     var snapshot = _result.Snapshot;
+    <p class="capture"><strong>@snapshot.CaptureSource</strong> · Build @snapshot.Build.BuildId
+        (@snapshot.Build.BuildNumber) · captured
+        @(snapshot.CapturedAt?.ToString("u", CultureInfo.InvariantCulture) ?? "before capture timestamps were recorded")</p>
     <section class="notice">
         <strong>Descriptive comparison, not a significance claim.</strong>
         <p>One build, different machines and measurement counts. Means are nanoseconds per operation;
@@ -180,7 +183,8 @@ else
         {
             <details class="provenance">
                 <summary>@lane.Provenance.DisplayName</summary>
-                <p>Helix job <code>@lane.Provenance.HelixJobId</code></p>
+                <p>Helix job <code>@lane.Provenance.HelixJobId</code>;
+                    @lane.Partitions.Length / @lane.Provenance.ExpectedPartitions partitions captured.</p>
                 <p>Target runtime package: @lane.Provenance.RuntimeVersion<br />V8: @lane.Provenance.V8Version<br />
                     Workload: @lane.Provenance.WorkloadVersion<br />Configuration: @lane.Provenance.Configuration</p>
                 <p>Host SDK (not target runtime): @(lane.Provenance.HostSdkVersion ?? "unavailable")<br />
@@ -205,6 +209,8 @@ else
 @code {
     private const int PageSize = 50;
     private string[] _buildIds = [];
+    private IReadOnlyDictionary<string, BuildSnapshotDescriptor> _buildDescriptors =
+        new Dictionary<string, BuildSnapshotDescriptor>(StringComparer.Ordinal);
     private string _buildId = "";
     private BuildComparisonResult? _result;
     private string? _error;
@@ -232,7 +238,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _buildIds = Store.GetBuildIds();
+        var descriptors = await Store.GetDescriptorsAsync();
+        _buildIds = descriptors.Select(value => value.BuildId).ToArray();
+        _buildDescriptors = descriptors.ToDictionary(value => value.BuildId, StringComparer.Ordinal);
         if (_buildIds.Length > 0)
         {
             _buildId = _buildIds[0];
@@ -274,4 +282,8 @@ else
     private static string FormatRatio(double? value) =>
         value is { } number && double.IsFinite(number)
             ? number.ToString("0.000'x'", CultureInfo.InvariantCulture) : "unavailable";
+
+    private string BuildLabel(string id) => _buildDescriptors.TryGetValue(id, out var descriptor)
+        ? $"{descriptor.BuildId} · {descriptor.BuildNumber} · {descriptor.CaptureSource}"
+        : id;
 }

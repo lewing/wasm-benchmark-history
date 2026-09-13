@@ -19,7 +19,7 @@
     <section class="loading-panel" aria-live="polite">
         <span class="spinner"></span>
         <div>
-            <strong>Loading three benchmark indexes</strong>
+            <strong>Loading published indexes and direct snapshots</strong>
             <p>History pages stay untouched until you choose a benchmark.</p>
         </div>
     </section>
@@ -100,7 +100,9 @@ else
                                     @onclick="() => SelectBenchmark(item.Entry)">
                                 <span class="result-name">@GetBenchmarkLabel(item)</span>
                                 <span class="availability @(item.Entry.IsShared ? "shared" : "partial")">
-                                    @(item.Entry.IsShared ? "3/3" : $"{item.Entry.Pages.Count}/3")
+                                    @(item.Entry.IsShared
+                                        ? $"{KnownRunConfigurations.All.Count}/{KnownRunConfigurations.All.Count}"
+                                        : $"{item.Entry.AvailableRunCount}/{KnownRunConfigurations.All.Count}")
                                 </span>
                             </button>
                         }
@@ -114,11 +116,11 @@ else
         </div>
 
         <div class="run-area">
-            <label>2. Choose 2–3 run configurations</label>
+            <label>2. Choose 2–4 run configurations</label>
             <div class="run-options">
                 @foreach (var run in KnownRunConfigurations.All)
                 {
-                    var available = _selectedBenchmark?.Pages.ContainsKey(run.Id) ?? false;
+                    var available = _selectedBenchmark?.IsAvailable(run.Id) ?? false;
                     <label class="run-option @(available ? null : "unavailable")">
                         <input type="checkbox"
                                checked="@_selectedRunIds.Contains(run.Id)"
@@ -203,6 +205,24 @@ else
             <span>Normalize to @_histories[0].Run.DisplayName</span>
         </label>
     </section>
+
+    @if (DirectObservationCount > 0)
+    {
+        <div class="state-banner direct-source" role="status">
+            <strong>Temporary direct-run data.</strong>
+            <span>@DirectObservationCount direct Helix snapshot observation(s) are merged with published history.
+                Equivalent points prefer the published source; conflicts fail visibly. R2R is not a continuous trend,
+                and variability is not computed until enough direct snapshots exist.</span>
+        </div>
+    }
+
+    @if (DataConflicts.Length > 0)
+    {
+        <div class="error-banner" role="alert">
+            <strong>Published/direct overlap conflict.</strong>
+            <span>@string.Join(' ', DataConflicts)</span>
+        </div>
+    }
 
     <HistoryChart Histories="_histories"
                   Matches="_matches"
@@ -365,8 +385,13 @@ else
 
     private bool CanLoad =>
         _selectedBenchmark is not null
-        && _selectedRunIds.Count is >= 2 and <= 3
+        && _selectedRunIds.Count is >= 2 and <= 4
         && !_isLoadingHistories;
+
+    private int DirectObservationCount => _histories.Sum(history =>
+        history.Observations.Count(observation => observation.Source == ObservationSource.DirectSnapshot));
+    private string[] DataConflicts => _histories.SelectMany(history => history.DataConflicts ?? [])
+        .Distinct(StringComparer.Ordinal).ToArray();
 
     private IReadOnlyList<MatchedComparison> DisplayedMatches =>
         _matches.TakeLast(DisplayLimit).Reverse().ToArray();
@@ -386,7 +411,7 @@ else
             _sharedTotal = _catalog.Entries.Count(entry => entry.IsShared);
             _runTotals = KnownRunConfigurations.All.ToDictionary(
                 run => run.Id,
-                run => _catalog.Entries.Count(entry => entry.Pages.ContainsKey(run.Id)),
+                run => _catalog.Entries.Count(entry => entry.IsAvailable(run.Id)),
                 StringComparer.Ordinal);
             await RestoreSharedStateAsync(sharedState.State);
         }
@@ -418,7 +443,7 @@ else
         _selectedBenchmark = entry;
         _searchText = entry.Benchmark;
         _selectedRunIds.Clear();
-        foreach (var run in KnownRunConfigurations.All.Where(run => entry.Pages.ContainsKey(run.Id)))
+        foreach (var run in KnownRunConfigurations.All.Where(run => entry.IsAvailable(run.Id)))
         {
             _selectedRunIds.Add(run.Id);
         }
@@ -636,8 +661,8 @@ else
             _selectedRunIds.Clear();
             var requestedRuns = state.RunIds.Count > 0
                 ? KnownRunConfigurations.All.Where(run => state.RunIds.Contains(run.Id))
-                : KnownRunConfigurations.All.Where(run => entry.Pages.ContainsKey(run.Id));
-            foreach (var run in requestedRuns.Where(run => entry.Pages.ContainsKey(run.Id)))
+                : KnownRunConfigurations.All.Where(run => entry.IsAvailable(run.Id));
+            foreach (var run in requestedRuns.Where(run => entry.IsAvailable(run.Id)))
             {
                 _selectedRunIds.Add(run.Id);
             }
@@ -646,7 +671,7 @@ else
             {
                 AddStateMessage("The shared run selection is not available for this benchmark.");
                 _selectedRunIds.Clear();
-                foreach (var run in KnownRunConfigurations.All.Where(run => entry.Pages.ContainsKey(run.Id)))
+                foreach (var run in KnownRunConfigurations.All.Where(run => entry.IsAvailable(run.Id)))
                 {
                     _selectedRunIds.Add(run.Id);
                 }

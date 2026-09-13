@@ -52,4 +52,24 @@ public sealed class BuildSnapshotDataTests
             Assert.Equal(expectedRatios[index], pairs[index].GeometricMean!.Value, 10);
         }
     }
+
+    [Fact]
+    public async Task Build3074629_ContainsCompleteDirectRunInventory()
+    {
+        var snapshot = await BuildSnapshotImporter.ReadAsync(
+            Path.Combine(AppContext.BaseDirectory, "DataSets", "3074629.json.gz"));
+        var result = BuildComparison.Analyze(snapshot);
+
+        Assert.Equal("3074629", snapshot.Build.BuildId);
+        Assert.Equal("Direct Helix snapshot", snapshot.CaptureSource);
+        Assert.NotNull(snapshot.CapturedAt);
+        Assert.Equal(60, snapshot.Lanes.Sum(lane => lane.Partitions.Length));
+        Assert.All(snapshot.Lanes, lane => Assert.All(lane.Partitions,
+            partition => Assert.Equal("passed", partition.Status)));
+        Assert.Equal(5_244, result.Common.Length);
+        Assert.Equal([5_682, 5_288, 5_622, 5_640], result.Coverage.Select(value => value.Valid));
+        Assert.Equal([1, 2, 22, 4], result.Coverage.Select(value => value.Invalid));
+        Assert.All(result.Coverage, value => Assert.Equal(0, value.Duplicates));
+        Assert.All(result.Coverage, value => Assert.Equal(0, value.Unidentified));
+    }
 }

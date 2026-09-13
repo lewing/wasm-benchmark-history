@@ -185,6 +185,36 @@ public sealed class BuildComparisonTests
         Assert.Null(value.InvalidReason);
     }
 
+    [Fact]
+    public void Import_CombinedPerfLabReportPreservesExactNameAndRawSamples()
+    {
+        using var document = JsonDocument.Parse("""
+            [{"build":{"gitHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "additionalData":{"privatePath":"/home/private/results"}},
+              "os":{"machineName":"private-machine"},
+              "run":{"perfRepoHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "correlationId":"private-correlation"},
+              "tests":[{"name":"N.T.M(Value: \"a/b+c\")","categories":["Libraries"],
+                "counters":[{"name":"Duration of single invocation","topCounter":true,
+                  "defaultCounter":true,"metricName":"ns","results":[1,2,3]}]}]}]
+            """);
+
+        var values = BuildSnapshotImporter.ParseReport(
+            document.RootElement, "Partition0", "combined.json", out var rejected);
+
+        var value = Assert.Single(values);
+        Assert.Equal(0, rejected);
+        Assert.Equal("N.T.M(Value: \"a/b+c\")", value.Identity.DisplayName);
+        Assert.Equal([1d, 2d, 3d], Assert.IsType<double[]>(value.Statistics.OriginalValues));
+        Assert.Equal(2, value.Statistics.Mean);
+        Assert.Equal(1, value.Statistics.Variance);
+        Assert.Equal(3, value.Statistics.N);
+        var serialized = JsonSerializer.Serialize(values);
+        Assert.DoesNotContain("private-machine", serialized);
+        Assert.DoesNotContain("private-correlation", serialized);
+        Assert.DoesNotContain("/home/private", serialized);
+    }
+
     [Theory]
     [InlineData("[1,2]")]
     [InlineData("""[1,"NaN",3]""")]
@@ -211,14 +241,17 @@ public sealed class BuildComparisonTests
     {
         var snapshot = Snapshot(BuildComparison.LaneIds.Select(id => Lane(id, Measurement("one", 1))).ToArray());
         var first = snapshot.Lanes[0];
-        var mixed = first with { Provenance = first.Provenance with
-            { Build = snapshot.Build with { BuildId = "other" } } };
+        var mixed = first with
+        {
+            Provenance = first.Provenance with
+            { Build = snapshot.Build with { BuildId = "other" } }
+        };
         Assert.Throws<InvalidDataException>(() => BuildComparison.Analyze(snapshot with
-            { Lanes = [mixed, .. snapshot.Lanes.Skip(1)] }));
+        { Lanes = [mixed, .. snapshot.Lanes.Skip(1)] }));
         Assert.Throws<InvalidDataException>(() => BuildComparison.Analyze(snapshot with
-            { Lanes = [first, first, .. snapshot.Lanes.Skip(2)] }));
+        { Lanes = [first, first, .. snapshot.Lanes.Skip(2)] }));
         Assert.Throws<InvalidDataException>(() => BuildComparison.Analyze(snapshot with
-            { Lanes = [first with { Partitions = [first.Partitions[0], first.Partitions[0]] }, .. snapshot.Lanes.Skip(1)] }));
+        { Lanes = [first with { Partitions = [first.Partitions[0], first.Partitions[0]] }, .. snapshot.Lanes.Skip(1)] }));
     }
 
     [Fact]

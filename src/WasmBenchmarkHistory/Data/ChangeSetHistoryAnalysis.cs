@@ -59,7 +59,7 @@ public static class ChangeSetHistoryAnalyzer
         var assessment = Assess(baselineContext, compareContext, difference);
         var state = new HistoryPageState(
             history.Benchmark,
-            KnownRunConfigurations.All.Select(run => run.Id).ToArray(),
+            KnownRunConfigurations.Published.Select(run => run.Id).ToArray(),
             false,
             HistoryTimeRange.All,
             history.Run.Id,

@@ -1,6 +1,42 @@
 using WasmBenchmarkHistory.Components;
 using WasmBenchmarkHistory.Data;
 
+if (args.Length > 0 && args[0] == "--discover-build")
+{
+    if (args.Length != 2)
+        throw new ArgumentException("Usage: --discover-build <internal-build-url-or-id>");
+    var discovery = await new DirectRunAcquirer().DiscoverAsync(args[1]);
+    Console.WriteLine($"Build {discovery.Build.BuildId} ({discovery.Build.BuildNumber})");
+    foreach (var lane in discovery.Lanes)
+    {
+        if (lane.HelixJobId is null)
+        {
+            Console.WriteLine($"{lane.Id}: missing");
+            continue;
+        }
+        var workItems = await new DirectRunAcquirer().LoadWorkItemsAsync(lane.HelixJobId);
+        Console.WriteLine($"{lane.Id}: {lane.HelixJobId}, {workItems.Length} partitions, " +
+            $"{workItems.Count(item => item.Status == "passed")} passed, " +
+            $"{workItems.Count(item => item.Status == "failed")} failed");
+    }
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--acquire-build")
+{
+    if (args.Length is not (3 or 5) || args.Length == 5 && args[3] != "--cache")
+        throw new ArgumentException(
+            "Usage: --acquire-build <internal-build-url-or-id> <output.json.gz> [--cache <directory>]");
+    var snapshot = await new DirectRunAcquirer().AcquireAsync(
+        args[1], args[2], args.Length == 5 ? args[4] : null);
+    var comparison = BuildComparison.Analyze(snapshot);
+    Console.WriteLine($"Build {snapshot.Build.BuildId}: {comparison.Rows.Length} identities, " +
+        $"{comparison.Common.Length} valid four-runtime matches.");
+    foreach (var coverage in comparison.Coverage)
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(coverage));
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--import-build")
 {
     if (args.Length != 3)

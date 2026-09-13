@@ -188,7 +188,7 @@ public static class HistoryPageStateCodec
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        if (runIds.Length is < 2 or > 3
+        if (runIds.Length is < 2 or > 4
             || runIds.Any(id => !KnownRunConfigurations.All.Any(run => run.Id == id)))
         {
             warnings.Add("The shared run selection is invalid and was ignored.");

@@ -27,17 +27,29 @@ public sealed record LaneProvenance(
 
 public sealed record ImportPartition(string Name, string Status, string Note, string[] Reports);
 public sealed record ImportLane(LaneProvenance Provenance, ImportPartition[] Partitions);
-public sealed record BuildImportManifest(BuildProvenance Build, ImportLane[] Lanes, string[] Caveats);
+public sealed record BuildImportManifest(
+    BuildProvenance Build,
+    ImportLane[] Lanes,
+    string[] Caveats,
+    string CaptureSource = "Imported snapshot",
+    DateTimeOffset? CapturedAt = null);
 
-public sealed record BenchmarkIdentity(string Namespace, string Type, string Method, string Parameters)
+public sealed record BenchmarkIdentity(
+    string Namespace,
+    string Type,
+    string Method,
+    string Parameters,
+    string? ExactName = null)
 {
-    // A structured key avoids delimiter collisions and never incorporates BDN lane job IDs.
+    // Combined perf-lab reports expose one exact canonical name instead of split BDN identity fields.
     [JsonIgnore]
-    public string Key => JsonSerializer.Serialize(new[] { Namespace, Type, Method, Parameters });
+    public string Key => ExactName is null
+        ? JsonSerializer.Serialize(new[] { "structured", Namespace, Type, Method, Parameters })
+        : JsonSerializer.Serialize(new[] { "exact", ExactName });
     [JsonIgnore]
-    public string DisplayName =>
+    public string DisplayName => ExactName ??
         $"{(Namespace.Length == 0 ? "" : Namespace + ".")}{Type}.{Method}" +
-        (Parameters.Length == 0 ? "" : $"({Parameters})");
+            (Parameters.Length == 0 ? "" : $"({Parameters})");
 }
 
 public sealed record BenchmarkStatistics(
@@ -70,7 +82,12 @@ public sealed record BuildLane(
     BuildMeasurement[] Measurements);
 
 public sealed record BuildSnapshot(
-    int SchemaVersion, BuildProvenance Build, BuildLane[] Lanes, string[] Caveats);
+    int SchemaVersion,
+    BuildProvenance Build,
+    BuildLane[] Lanes,
+    string[] Caveats,
+    string CaptureSource = "Imported snapshot",
+    DateTimeOffset? CapturedAt = null);
 
 public sealed record LaneCoverage(
     string LaneId, int Entries, int Unique, int Valid, int Missing, int Invalid, int Duplicates,

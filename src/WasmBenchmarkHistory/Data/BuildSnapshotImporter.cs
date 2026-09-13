@@ -43,7 +43,9 @@ public static class BuildSnapshotImporter
             }
             lanes.Add(new BuildLane(lane.Provenance, coverage.ToArray(), measurements.ToArray()));
         }
-        var snapshot = new BuildSnapshot(1, manifest.Build, lanes.ToArray(), manifest.Caveats);
+        var snapshot = new BuildSnapshot(
+            1, manifest.Build, lanes.ToArray(), manifest.Caveats,
+            manifest.CaptureSource, manifest.CapturedAt);
         BuildComparison.Validate(snapshot);
         return snapshot;
     }
@@ -51,6 +53,8 @@ public static class BuildSnapshotImporter
     public static BuildMeasurement[] ParseReport(
         JsonElement report, string partition, string fileName, out int unidentified)
     {
+        if (report.ValueKind == JsonValueKind.Array)
+            return ParsePerfLabReport(report, partition, fileName, out unidentified);
         if (!report.TryGetProperty("Benchmarks", out var benchmarks) ||
             benchmarks.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException($"'{fileName}' has no BenchmarkDotNet Benchmarks array.");
@@ -104,12 +108,65 @@ public static class BuildSnapshotImporter
         return values.ToArray();
     }
 
+    public static BuildMeasurement[] ParsePerfLabReport(
+        JsonElement reports, string partition, string fileName, out int unidentified)
+    {
+        if (reports.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException($"'{fileName}' is not a perf-lab report array.");
+        var values = new List<BuildMeasurement>();
+        unidentified = 0;
+        foreach (var report in reports.EnumerateArray())
+        {
+            if (!report.TryGetProperty("tests", out var tests) || tests.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException($"'{fileName}' contains a report without a tests array.");
+            foreach (var test in tests.EnumerateArray())
+            {
+                var name = Text(test, "name");
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    unidentified++;
+                    continue;
+                }
+                var counters = test.TryGetProperty("counters", out var counterArray) &&
+                    counterArray.ValueKind == JsonValueKind.Array
+                    ? counterArray.EnumerateArray().Where(counter =>
+                        Boolean(counter, "defaultCounter") && Boolean(counter, "topCounter")).ToArray()
+                    : [];
+                var samples = counters.Length == 1 ? Numbers(counters[0], "results") : null;
+                var statistics = Statistics(samples);
+                var invalidReason = counters.Length switch
+                {
+                    0 => "Perf-lab report has no default top counter.",
+                    > 1 => "Perf-lab report has multiple default top counters.",
+                    _ => BuildComparison.InvalidReason(statistics)
+                };
+                var categories = test.TryGetProperty("categories", out var categoryArray) &&
+                    categoryArray.ValueKind == JsonValueKind.Array
+                    ? categoryArray.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String)
+                        .Select(value => value.GetString()!).Distinct(StringComparer.Ordinal).ToArray()
+                    : [];
+                values.Add(new BuildMeasurement(
+                    new BenchmarkIdentity("", "", "", "", name),
+                    categories,
+                    statistics,
+                    partition,
+                    fileName,
+                    invalidReason,
+                    samples?.Length,
+                    null));
+            }
+        }
+        return values.ToArray();
+    }
+
     public static async Task WriteAsync(BuildSnapshot snapshot, string path)
     {
         BuildComparison.Validate(snapshot);
+        SnapshotSafety.Validate(snapshot);
+        var json = JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions);
         await using var file = File.Create(path);
         await using var gzip = new GZipStream(file, CompressionLevel.SmallestSize);
-        await JsonSerializer.SerializeAsync(gzip, snapshot, JsonOptions);
+        await gzip.WriteAsync(json);
     }
 
     public static async Task<BuildSnapshot> ReadAsync(string path)
@@ -127,6 +184,11 @@ public static class BuildSnapshotImporter
         element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString() : null;
 
+    private static bool Boolean(JsonElement element, string property) =>
+        element.ValueKind == JsonValueKind.Object &&
+        element.TryGetProperty(property, out var value) &&
+        value.ValueKind == JsonValueKind.True;
+
     private static double? Number(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object &&
         element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number &&
@@ -140,7 +202,7 @@ public static class BuildSnapshotImporter
     private static string? MeasurementConfiguration(string? displayInfo)
     {
         if (displayInfo is null)
-        return null;
+            return null;
         var parameterStart = displayInfo.IndexOf(" [", StringComparison.Ordinal);
         var job = parameterStart < 0 ? displayInfo : displayInfo[..parameterStart];
         // Full exporters can omit Job. Read only known numeric/enum settings, never copy the label.
@@ -158,16 +220,33 @@ public static class BuildSnapshotImporter
     {
         if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property, out var array) ||
         array.ValueKind != JsonValueKind.Array)
-        return null;
+            return null;
         var numbers = new List<double>();
         foreach (var value in array.EnumerateArray())
         {
-        if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number) ||
-            !double.IsFinite(number))
-            return null;
-        numbers.Add(number);
+            if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number) ||
+                !double.IsFinite(number))
+                return null;
+            numbers.Add(number);
         }
         return numbers.ToArray();
+    }
+
+    private static BenchmarkStatistics Statistics(double[]? samples)
+    {
+        if (samples is not { Length: > 0 })
+            return new(null, null, null, null, null, null, null);
+        var ordered = samples.Order().ToArray();
+        var mean = samples.Average();
+        var median = ordered.Length % 2 == 1
+            ? ordered[ordered.Length / 2]
+            : (ordered[ordered.Length / 2 - 1] + ordered[ordered.Length / 2]) / 2;
+        var variance = samples.Length > 1
+            ? samples.Sum(value => Math.Pow(value - mean, 2)) / (samples.Length - 1)
+            : 0;
+        var standardDeviation = Math.Sqrt(variance);
+        return new(mean, median, standardDeviation, standardDeviation / Math.Sqrt(samples.Length),
+            samples.Length, ordered[0], ordered[^1], variance, samples);
     }
 
     private static bool IsError(JsonElement value) => value.ValueKind switch
@@ -179,4 +258,30 @@ public static class BuildSnapshotImporter
         critical.ValueKind != JsonValueKind.False,
         _ => true
     };
+}
+
+public static class SnapshotSafety
+{
+    private static readonly string[] ProhibitedText =
+    [
+        "dev.azure.com",
+        "helix.dot.net",
+        ".blob.core.windows.net",
+        "?sig=",
+        "&sig=",
+        "access_token=",
+        "bearer ",
+        "sas token",
+        "\"machineName\":",
+        "\"correlationId\":",
+        "/home/",
+        "/users/"
+    ];
+
+    public static void Validate(BuildSnapshot snapshot)
+    {
+        var json = JsonSerializer.Serialize(snapshot, BuildSnapshotImporter.JsonOptions);
+        if (ProhibitedText.Any(value => json.Contains(value, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("Snapshot contains a prohibited URL, credential, account, machine, or path.");
+    }
 }
