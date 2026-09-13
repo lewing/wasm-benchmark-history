@@ -20,6 +20,17 @@ public sealed record ChangeSetHistoryAnalysis(
     HistoryBoundaryAssessment Assessment,
     string BenchmarkViewUri);
 
+public sealed record ChangeSetHistoryPreviewPoint(
+    DateTime Timestamp,
+    double Value,
+    bool IsBaseline,
+    bool IsCompare);
+
+public sealed record ChangeSetHistoryPreview(
+    IReadOnlyList<ChangeSetHistoryPreviewPoint> Points,
+    DateTime Start,
+    DateTime End);
+
 public static class ChangeSetHistoryAnalyzer
 {
     public const int ContextRadius = 3;
@@ -34,8 +45,8 @@ public static class ChangeSetHistoryAnalyzer
         string compareRuntimeSha,
         string? performanceSha = null)
     {
-        var baseline = Resolve(history, baselineRuntimeSha, performanceSha, "baseline");
-        var compare = Resolve(history, compareRuntimeSha, performanceSha, "compare");
+        var baseline = ResolveExact(history, baselineRuntimeSha, performanceSha, "baseline");
+        var compare = ResolveExact(history, compareRuntimeSha, performanceSha, "compare");
         var baselinePin = new InvestigationPin(
             history.Run.Id,
             ObservationIdentity.From(baseline));
@@ -66,7 +77,56 @@ public static class ChangeSetHistoryAnalyzer
             HistoryPageStateCodec.ToRelativeUri(state));
     }
 
-    private static BenchmarkObservation Resolve(
+    public static ChangeSetHistoryPreview CreatePreview(
+        BenchmarkHistory history,
+        string baselineRuntimeSha,
+        string compareRuntimeSha,
+        string? performanceSha = null,
+        int maximumPoints = 60)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumPoints, 10);
+
+        var baseline = ResolveExact(history, baselineRuntimeSha, performanceSha, "baseline");
+        var compare = ResolveExact(history, compareRuntimeSha, performanceSha, "compare");
+        var ordered = history.Observations
+            .OrderBy(observation => observation.Timestamp)
+            .ThenBy(observation => observation.RuntimeSha, StringComparer.Ordinal)
+            .ThenBy(observation => observation.PerformanceSha, StringComparer.Ordinal)
+            .ToArray();
+        var baselineIdentity = ObservationIdentity.From(baseline);
+        var compareIdentity = ObservationIdentity.From(compare);
+        var baselineIndex = Array.FindIndex(
+            ordered,
+            observation => ObservationIdentity.From(observation) == baselineIdentity);
+        var compareIndex = Array.FindIndex(
+            ordered,
+            observation => ObservationIdentity.From(observation) == compareIdentity);
+        var start = Math.Max(0, Math.Min(baselineIndex, compareIndex) - 10);
+        var end = Math.Min(ordered.Length - 1, Math.Max(baselineIndex, compareIndex) + 10);
+        var indexes = SampleIndexes(start, end, maximumPoints);
+        indexes.Add(baselineIndex);
+        indexes.Add(compareIndex);
+        var points = indexes
+            .Order()
+            .Select(index =>
+            {
+                var observation = ordered[index];
+                var identity = ObservationIdentity.From(observation);
+                return new ChangeSetHistoryPreviewPoint(
+                    observation.Timestamp,
+                    observation.Value,
+                    identity == baselineIdentity,
+                    identity == compareIdentity);
+            })
+            .ToArray();
+
+        return new ChangeSetHistoryPreview(
+            points,
+            ordered[start].Timestamp,
+            ordered[end].Timestamp);
+    }
+
+    internal static BenchmarkObservation ResolveExact(
         BenchmarkHistory history,
         string runtimeSha,
         string? performanceSha,
@@ -104,6 +164,27 @@ public static class ChangeSetHistoryAnalyzer
         }
 
         return matches[0];
+    }
+
+    private static HashSet<int> SampleIndexes(
+        int start,
+        int end,
+        int maximumPoints)
+    {
+        var count = end - start + 1;
+        if (count <= maximumPoints)
+        {
+            return Enumerable.Range(start, count).ToHashSet();
+        }
+
+        var indexes = new HashSet<int>();
+        for (var index = 0; index < maximumPoints; index++)
+        {
+            indexes.Add((int)Math.Round(
+                start + (double)(end - start) * index / (maximumPoints - 1)));
+        }
+
+        return indexes;
     }
 
     private static HistoryContextPoint Context(

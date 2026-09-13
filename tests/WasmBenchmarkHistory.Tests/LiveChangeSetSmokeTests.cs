@@ -67,8 +67,15 @@ public sealed class LiveChangeSetSmokeTests
             group.Run.BaselineRuntimeSha,
             group.Run.CompareRuntimeSha,
             document.Metadata.PerformanceSha);
+        var preview = ChangeSetHistoryAnalyzer.CreatePreview(
+            history,
+            group.Run.BaselineRuntimeSha,
+            group.Run.CompareRuntimeSha,
+            document.Metadata.PerformanceSha);
 
         Assert.Equal(row.Benchmark, history.Benchmark);
         Assert.NotEmpty(analysis.BenchmarkViewUri);
+        Assert.Single(preview.Points, point => point.IsBaseline);
+        Assert.Single(preview.Points, point => point.IsCompare);
     }
 }

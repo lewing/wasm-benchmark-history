@@ -99,11 +99,13 @@ Rows receive a conservative report-fact heuristic:
 These categories are not statistical-significance claims. The thresholds live
 in `ChangeSetSignalHeuristic` and have focused tests.
 
-Every benchmark row includes a compact A→B slope sparkline derived only from
-the issue's reported ratio. It is a quick direction/magnitude cue, not a history
-chart. Full historical context still requires the explicit per-benchmark
-**Analyze history** action so opening a change set never bulk-downloads all
-histories.
+Every benchmark row initially includes a compact A→B slope sparkline derived
+only from the issue's reported ratio. Each expanded family also offers
+**Load history previews**, which fetches only that family's histories with
+bounded concurrency and replaces the slope glyphs with sampled real
+observations around the exact A/B boundary. Full numerical context still
+requires the explicit per-benchmark **Analyze history** action, so opening a
+change set never bulk-downloads all histories.
 
 History enrichment is strictly on demand for one selected benchmark. The exact
 allowlisted report URL is fetched through the existing disk cache and parsed as

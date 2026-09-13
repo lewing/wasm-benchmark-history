@@ -246,6 +246,39 @@ th code {
     font-size: .72rem;
 }
 
+.group-preview-controls {
+    align-items: center;
+    background: rgb(4 12 25 / 35%);
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: .65rem .85rem;
+}
+
+.group-preview-controls p {
+    color: var(--muted);
+    font-size: .68rem;
+    line-height: 1.4;
+    margin: 0;
+}
+
+.group-preview-controls button {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: .45rem;
+    color: var(--accent);
+    cursor: pointer;
+    flex: 0 0 auto;
+    font-size: .68rem;
+    padding: .5rem .7rem;
+}
+
+.group-preview-controls button:disabled {
+    cursor: wait;
+    opacity: .6;
+}
+
 .direction,
 .quality-badge,
 .availability-list span {
@@ -354,6 +387,16 @@ td small {
 
 .reported-change > span {
     min-width: 58px;
+}
+
+.preview-status,
+.preview-error {
+    font-size: .6rem;
+    white-space: nowrap;
+}
+
+.preview-error {
+    color: #ffc878;
 }
 
 .evidence-button {
@@ -594,5 +637,10 @@ pre {
 
     .change-group > summary {
         grid-template-columns: 1fr;
+    }
+
+    .group-preview-controls {
+        align-items: stretch;
+        flex-direction: column;
     }
 }
