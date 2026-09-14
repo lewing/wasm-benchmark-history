@@ -462,6 +462,14 @@ svg {
     font-weight: 750;
 }
 
+.exact-value {
+    color: var(--muted);
+    display: block;
+    font-family: var(--mono);
+    font-size: .58rem;
+    overflow-wrap: anywhere;
+}
+
 .hover-variability {
     color: var(--muted);
     display: flex;

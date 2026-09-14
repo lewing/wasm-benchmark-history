@@ -304,11 +304,17 @@ else
                                 @foreach (var history in _histories)
                                 {
                                     var observation = match.Observations[history.Run.Id];
+                                    var unit = DurationFormatter.SelectUnit(observation.Value);
                                     <td class="value-cell">
-                                        <strong>@FormatValue(observation.Value)</strong>
+                                        <strong title="@DurationFormatter.FormatExactNanoseconds(observation.Value)"
+                                                aria-label="@DurationFormatter.FormatExactNanoseconds(observation.Value)">
+                                            @DurationFormatter.Format(observation.Value, unit)
+                                        </strong>
                                         @if (observation.Error is not null)
                                         {
-                                            <span> ± @FormatValue(observation.Error.Value)</span>
+                                            <span title="@DurationFormatter.FormatExactNanoseconds(observation.Error)">
+                                                ± @DurationFormatter.Format(observation.Error.Value, unit)
+                                            </span>
                                         }
                                         @if (baseline.Value == 0)
                                         {
@@ -894,9 +900,6 @@ else
 
     private static string ShortSha(string sha) =>
         sha.Length <= 8 ? sha : sha[..8];
-
-    private static string FormatValue(double value) =>
-        value.ToString(value >= 100 ? "N2" : "N4", CultureInfo.InvariantCulture);
 
     private static string GetBenchmarkLabel(BenchmarkTreeItem item)
     {

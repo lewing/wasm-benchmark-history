@@ -31,6 +31,13 @@ chart to selection mode and focuses the keyboard scrubber, so the next point can
 be previewed and pinned immediately. A short status message states which pin is
 still needed.
 
+All app-owned duration displays start from nanoseconds and use adaptive `ps`,
+`ns`, `µs`, `ms`, or `s` units. Each chart axis keeps one stable unit across its
+ticks; tables may adapt per value, with associated errors shown in the same
+unit. Hover and detail views retain the exact canonical nanosecond value in
+visible secondary text and accessible titles. Source-provided strings imported
+from autofiling issues remain unchanged as evidence.
+
 ### Investigate a temporal regression
 
 Use **30d**, **90d**, **1y**, or **All** to focus the chart, or drag across the

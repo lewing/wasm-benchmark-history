@@ -17,11 +17,12 @@
             @foreach (var series in _series)
             {
                 var range = MiniRange(series);
+                var unit = DurationFormatter.SelectUnit(range.Minimum, range.Maximum);
                 <article>
                     <header>
                         <span class="series-swatch" style="background:@series.History.Run.Color"></span>
                         <strong>@series.History.Run.DisplayName</strong>
-                        <small>@FormatCompact(range.Minimum)–@FormatCompact(range.Maximum)</small>
+                        <small>@FormatPanelValue(range.Minimum, unit)–@FormatPanelValue(range.Maximum, unit)</small>
                     </header>
                     <svg viewBox="0 0 1000 145"
                          preserveAspectRatio="none"
@@ -47,7 +48,7 @@
                                       x="@(MiniPlotLeft - 10)"
                                       y="@(y + 4)"
                                       text-anchor="end">
-                                @FormatCompact(value)
+                                @FormatPanelValue(value, unit)
                             </svg:text>
                         }
 
@@ -433,17 +434,10 @@
             : series.Volatility.MinBy(point =>
                 Math.Abs((point.Timestamp - PinnedTimestamp.Value).Ticks));
 
-    private static string FormatCompact(double value)
-    {
-        var absolute = Math.Abs(value);
-        return absolute switch
-        {
-            >= 1_000_000_000 => (value / 1_000_000_000d).ToString("0.##B", CultureInfo.InvariantCulture),
-            >= 1_000_000 => (value / 1_000_000d).ToString("0.##M", CultureInfo.InvariantCulture),
-            >= 1_000 => (value / 1_000d).ToString("0.##K", CultureInfo.InvariantCulture),
-            _ => value.ToString("0.###", CultureInfo.InvariantCulture)
-        };
-    }
+    private string FormatPanelValue(double value, DurationUnit unit) =>
+        Normalized
+            ? value.ToString("0.###×", CultureInfo.CurrentCulture)
+            : DurationFormatter.Format(value, unit);
 
     private static string FormatPercent(double value) =>
         double.IsFinite(value)

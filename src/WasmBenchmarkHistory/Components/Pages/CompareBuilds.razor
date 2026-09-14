@@ -36,7 +36,8 @@ else
         @(snapshot.CapturedAt?.ToString("u", CultureInfo.InvariantCulture) ?? "before capture timestamps were recorded")</p>
     <section class="notice">
         <strong>Descriptive comparison, not a significance claim.</strong>
-        <p>One build, different machines and measurement counts. Means are nanoseconds per operation;
+        <p>One build, different machines and measurement counts. Durations use adaptive units;
+            exact nanoseconds remain available in details.
             lower is better. Speedup = baseline mean / candidate mean; above 1 means the candidate is faster.
             Every aggregate uses the same valid four-runtime intersection, with equal weight per benchmark
             and parameter combination. Missing, invalid, or duplicate identities are never replaced with zero.</p>
@@ -111,7 +112,7 @@ else
         {
             <p><strong>@_trendBenchmark</strong></p>
             <p>@_historyArchive.Builds.Length retained complete builds, ordered by measurement timestamp.
-                Values are means in nanoseconds. “vs prior” compares each lane with its previous retained build;
+                Values use adaptive time units. “vs prior” compares each lane with its previous retained build;
                 “vs Mono” compares lanes within the same build. Above 1 means the current lane is faster.
                 Compact archive generated
                 @_historyArchive.GeneratedAt.ToString("u", CultureInfo.InvariantCulture).</p>
@@ -144,8 +145,15 @@ else
                                     <td>
                                         @if (cell.Status == "valid")
                                         {
-                                            <strong>@Number(cell.Mean) ns</strong>
-                                            <small>SE @Number(cell.Error); variance @Number(cell.Variance); N @cell.N</small>
+                                            var unit = DurationFormatter.SelectUnit(cell.Mean!.Value);
+                                            <strong title="@DurationFormatter.FormatExactNanoseconds(cell.Mean)">
+                                                @DurationFormatter.Format(cell.Mean.Value, unit)
+                                            </strong>
+                                            <small title="Exact SE @DurationFormatter.FormatExactNanoseconds(cell.Error);
+                                                exact variance @DurationFormatter.FormatExactNanosecondsSquared(cell.Variance)">
+                                                SE @DurationFormatter.Format(cell.Error, unit);
+                                                variance @DurationFormatter.FormatVariance(cell.Variance, unit); N @cell.N
+                                            </small>
                                             <small class="ratio">vs prior @FormatRatio(cell.SpeedupVsPrevious);
                                                 vs Mono @FormatRatio(cell.SpeedupVsMono)</small>
                                         }
@@ -202,12 +210,17 @@ else
                                 {
                                     @foreach (var measurement in row.Cells[id].Measurements)
                                     {
+                                        var detailUnit = DurationFormatter.SelectUnit(
+                                            measurement.Statistics.Mean ?? 0);
                                         <p>@LaneName(id): @measurement.Partition / @measurement.Report
                                             @measurement.InvalidReason</p>
                                         <p>Measurement records (all stages): @(measurement.MeasurementCount?.ToString() ?? "unavailable").
                                             Retained samples: @(measurement.Statistics.N?.ToString() ?? "unavailable").
-                                            Median @Number(measurement.Statistics.Median) ns;
-                                            min @Number(measurement.Statistics.Min) ns; max @Number(measurement.Statistics.Max) ns.</p>
+                                            Median @DurationFormatter.Format(measurement.Statistics.Median, detailUnit);
+                                            min @DurationFormatter.Format(measurement.Statistics.Min, detailUnit);
+                                            max @DurationFormatter.Format(measurement.Statistics.Max, detailUnit).</p>
+                                        <p>Exact mean @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.Mean);
+                                            exact SE @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.StandardError).</p>
                                         <p>Measurement settings: @(measurement.MeasurementConfiguration ?? "unavailable")</p>
                                     }
                                 }
@@ -220,8 +233,13 @@ else
                                     @if (cell.ValidMeasurement is { } measurement)
                                     {
                                         var stats = measurement.Statistics;
-                                        <strong>@Number(stats.Mean) ns</strong>
-                                        <small>SD @Number(stats.StandardDeviation); SE @Number(stats.StandardError); N @stats.N</small>
+                                        var unit = DurationFormatter.SelectUnit(stats.Mean!.Value);
+                                        <strong title="@DurationFormatter.FormatExactNanoseconds(stats.Mean)">
+                                            @DurationFormatter.Format(stats.Mean.Value, unit)
+                                        </strong>
+                                        <small>SD @DurationFormatter.Format(stats.StandardDeviation, unit);
+                                            SE @DurationFormatter.Format(stats.StandardError, unit); N @stats.N</small>
+                                        <small>Exact @DurationFormatter.FormatExactNanoseconds(stats.Mean)</small>
                                         @if (row.IsCommon)
                                         {
                                             <small class="ratio">@FormatRatio(row.Cells[_baseline].ValidMeasurement!.Statistics.Mean / stats.Mean)</small>
@@ -358,8 +376,6 @@ else
     private void ResetPage() => _page = 0;
     private void PreviousPage() => _page--;
     private void NextPage() => _page++;
-    private static string Number(double? value) =>
-        value?.ToString("N2", CultureInfo.InvariantCulture) ?? "unavailable";
     private static string FormatRatio(double? value) =>
         value is { } number && double.IsFinite(number)
             ? number.ToString("0.000'x'", CultureInfo.InvariantCulture) : "unavailable";

@@ -688,13 +688,19 @@
     private static RenderFragment ContextCard(
         string title,
         HistoryContextPoint context) => @<article class="context-card">
+            @{
+                var unit = DurationFormatter.SelectUnit(context.Observation.Value);
+            }
             <h4>@title</h4>
-            <strong>@context.Observation.Value.ToString("N3", CultureInfo.InvariantCulture)</strong>
+            <strong title="@DurationFormatter.FormatExactNanoseconds(context.Observation.Value)">
+                @DurationFormatter.Format(context.Observation.Value, unit)
+            </strong>
+            <small>Exact @DurationFormatter.FormatExactNanoseconds(context.Observation.Value)</small>
             <span>@context.Observation.Timestamp.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
             <dl>
-                <div><dt>Nearby median</dt><dd>@context.Nearby.Median.ToString("N3", CultureInfo.InvariantCulture)</dd></div>
-                <div><dt>Nearby IQR</dt><dd>@context.Nearby.InterquartileRange.ToString("N3", CultureInfo.InvariantCulture)</dd></div>
-                <div><dt>Trailing median</dt><dd>@context.Trailing.Median.ToString("N3", CultureInfo.InvariantCulture)</dd></div>
+                <div><dt>Nearby median</dt><dd>@DurationFormatter.Format(context.Nearby.Median, unit)</dd></div>
+                <div><dt>Nearby IQR</dt><dd>@DurationFormatter.Format(context.Nearby.InterquartileRange, unit)</dd></div>
+                <div><dt>Trailing median</dt><dd>@DurationFormatter.Format(context.Trailing.Median, unit)</dd></div>
                 <div><dt>Relative volatility</dt><dd>@(context.RelativeVolatilityPercent?.ToString("0.00'%'", CultureInfo.InvariantCulture) ?? "unavailable")</dd></div>
                 <div><dt>Samples</dt><dd>@context.Trailing.Count trailing / @context.Nearby.Count nearby</dd></div>
             </dl>
