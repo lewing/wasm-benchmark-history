@@ -183,7 +183,9 @@ public sealed record BenchmarkObservation(
     string? TraceName,
     ObservationSource Source = ObservationSource.PublishedHistory,
     string? BuildId = null,
-    IReadOnlyList<double>? Samples = null);
+    IReadOnlyList<double>? Samples = null,
+    string? Partition = null,
+    string? SourceLabel = null);
 
 public enum ObservationSource
 {

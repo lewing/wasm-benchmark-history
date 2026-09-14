@@ -281,7 +281,13 @@ public static class SnapshotSafety
     public static void Validate(BuildSnapshot snapshot)
     {
         var json = JsonSerializer.Serialize(snapshot, BuildSnapshotImporter.JsonOptions);
-        if (ProhibitedText.Any(value => json.Contains(value, StringComparison.OrdinalIgnoreCase)))
+        ValidateJson(System.Text.Encoding.UTF8.GetBytes(json));
+    }
+
+    public static void ValidateJson(ReadOnlySpan<byte> json)
+    {
+        var text = System.Text.Encoding.UTF8.GetString(json);
+        if (ProhibitedText.Any(value => text.Contains(value, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Snapshot contains a prohibited URL, credential, account, machine, or path.");
     }
 }

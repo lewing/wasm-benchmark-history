@@ -7,10 +7,11 @@ public sealed class BenchmarkHistoryService(
     BenchmarkIndexParser indexParser,
     BenchmarkHistoryParser historyParser,
     IOptions<BenchmarkDataOptions> options,
-    BuildSnapshotStore? snapshotStore = null)
+    IEnumerable<IBenchmarkHistoryProvider>? historyProviders = null)
 {
     private readonly BenchmarkDataOptions _options = options.Value;
-    private Task<BuildSnapshot[]>? _snapshotTask;
+    private readonly IBenchmarkHistoryProvider[] _historyProviders =
+        historyProviders?.ToArray() ?? [];
 
     public async Task<BenchmarkCatalog> LoadCatalogAsync(
         CancellationToken cancellationToken = default)
@@ -41,19 +42,27 @@ public sealed class BenchmarkHistoryService(
             }
         }
 
-        var snapshots = await LoadSnapshotsAsync();
-        var directAvailability = DirectSnapshotHistory.GetAvailability(snapshots);
-        foreach (var direct in directAvailability)
+        var directAvailability = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var provider in _historyProviders)
         {
-            if (!pagesByBenchmark.ContainsKey(direct.Key))
-                pagesByBenchmark.Add(direct.Key, new Dictionary<string, Uri>(StringComparer.Ordinal));
+            foreach (var direct in await provider.GetAvailabilityAsync())
+            {
+                if (!directAvailability.TryGetValue(direct.Key, out var runs))
+                {
+                    runs = new HashSet<string>(StringComparer.Ordinal);
+                    directAvailability.Add(direct.Key, runs);
+                }
+                runs.UnionWith(direct.Value);
+                if (!pagesByBenchmark.ContainsKey(direct.Key))
+                    pagesByBenchmark.Add(direct.Key, new Dictionary<string, Uri>(StringComparer.Ordinal));
+            }
         }
 
         return new BenchmarkCatalog(
             pagesByBenchmark.Select(pair => new BenchmarkCatalogEntry(
                 pair.Key,
                 pair.Value,
-                directAvailability.GetValueOrDefault(pair.Key))));
+                directAvailability.TryGetValue(pair.Key, out var runs) ? runs : null)));
     }
 
     public async Task<IReadOnlyList<BenchmarkHistory>> LoadHistoriesAsync(
@@ -67,7 +76,6 @@ public sealed class BenchmarkHistoryService(
                 BenchmarkDataError.UnknownBenchmark,
                 $"Benchmark '{benchmark}' is not present in the loaded indexes.");
 
-        var snapshots = await LoadSnapshotsAsync();
         var tasks = runIds.Select(async runId =>
         {
             var run = KnownRunConfigurations.Get(runId);
@@ -80,9 +88,28 @@ public sealed class BenchmarkHistoryService(
                     cancellationToken);
                 published = historyParser.Parse(benchmark, run, html);
             }
-            var direct = entry.DirectRuns.Contains(runId)
-                ? DirectSnapshotHistory.CreateHistory(benchmark, run, snapshots)
-                : null;
+            var directHistories = entry.DirectRuns.Contains(runId)
+                ? (await Task.WhenAll(_historyProviders.Select(
+                    provider => provider.LoadAsync(benchmark, run))))
+                    .Where(history => history is not null).Cast<BenchmarkHistory>().ToArray()
+                : [];
+            BenchmarkHistory? direct = null;
+            foreach (var candidate in directHistories)
+            {
+                if (direct is null)
+                {
+                    direct = candidate;
+                    continue;
+                }
+                var mergedDirect = DirectSnapshotHistory.MergeObservations(
+                    benchmark, runId, direct.Observations, candidate.Observations);
+                direct = direct with
+                {
+                    Observations = mergedDirect.Observations,
+                    DataConflicts = (direct.DataConflicts ?? []).Concat(candidate.DataConflicts ?? [])
+                        .Concat(mergedDirect.Conflicts).Distinct(StringComparer.Ordinal).ToArray()
+                };
+            }
             if (published is null && direct is null)
             {
                 throw new BenchmarkDataException(
@@ -118,6 +145,4 @@ public sealed class BenchmarkHistoryService(
         return historyParser.Parse(target.Benchmark, target.Run, html);
     }
 
-    private Task<BuildSnapshot[]> LoadSnapshotsAsync() =>
-        _snapshotTask ??= snapshotStore?.LoadAllAsync() ?? Task.FromResult(Array.Empty<BuildSnapshot>());
 }

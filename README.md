@@ -80,7 +80,33 @@ silently selecting one. **CoreCLR Wasm R2R (direct snapshots)** is available
 only for benchmark identities with valid direct measurements. Direct points
 use diamond markers, retain raw samples and errors, and show their snapshot/build
 source in the hover card. A single R2R point is not presented as a continuous
-trend and cannot produce rolling variability statistics.
+trend; fewer than three direct points are marker-only, and rolling variability
+still requires the configured minimum observation window.
+
+The bundled `DataSets/direct-history.json.gz` file is a temporary compact
+latest-build cache, not the canonical direct-run model. It is deterministically
+projected from full sanitized snapshots and retains exact benchmark identity,
+lane/build/partition provenance, mean, standard error, variance, sample count,
+validity, runtime/performance SHAs, and measurement timestamp. Raw sample arrays
+remain in full sanitized snapshots but are omitted from this bundled projection.
+The current retention policy is the latest **7 verified complete builds**.
+
+The current 6.6 MiB compact archive is about 80% smaller than the corresponding
+seven full gzip snapshots and retains these measurement timestamps:
+
+| Build | Build number | Timestamp (UTC) | Coverage note |
+|---|---|---|---|
+| 3068640 | `20260907.2` | 2026-09-07 09:35:50 | 60/60; one R2R upload-only failure recovered |
+| 3069775 | `20260908.3` | 2026-09-08 16:00:24 | 60/60 passed |
+| 3070008 | `20260908.6` | 2026-09-08 18:56:23 | 60/60; one CoreCLR interpreter artifact recovered |
+| 3070235 | `20260908.8` | 2026-09-08 23:42:47 | 60/60 passed |
+| 3074299 | `20260912.5` | 2026-09-12 19:04:14 | 60/60 passed |
+| 3074425 | `20260912.6` | 2026-09-13 03:54:51 | 60/60 passed |
+| 3074629 | `20260913.1` | 2026-09-13 14:59:42 | 60/60 passed |
+
+Builds 3071174, 3071763, and 3072440 were inspected but excluded:
+3071174 lacks usable artifacts for one Mono AOT and one CoreCLR interpreter
+partition, while the latter two have empty R2R reports in all 15 partitions.
 
 ## Autofiled change-set prototype
 
@@ -309,6 +335,54 @@ and contribute exact direct observations to the main benchmark explorer.
 Refresh remains a manual maintainer operation after a successful build; this is
 not an automatic replacement for the public allTestHistory pipeline.
 
+To refresh the retained multi-build series and keep reusable full sanitized run
+data outside the repository:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --refresh-direct-history \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/direct-history.json.gz \
+  /absolute/private/full-snapshot-archive \
+  7 \
+  3068640 3069775 3070008 3070235 3071174 \
+  3071763 3072440 3074299 3074425 3074629
+```
+
+The command discovers and validates each build, writes full allowlisted
+snapshots (including retained sample arrays) to the configurable private archive,
+then derives and replaces the compact checked-in series. Builds with incomplete
+lane/partition artifact coverage are excluded explicitly; complete reports from
+upload-only failed work items remain eligible. Retention is applied by
+measurement timestamp, then build ID, so repeated refreshes order and prune the
+same input deterministically.
+
+Omit the build IDs to have the command query recent completed
+`dotnet-runtime-perf` definition 702 main builds and continue newest-first until
+it finds the requested number of complete runs:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --refresh-direct-history \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/direct-history.json.gz \
+  /absolute/private/full-snapshot-archive \
+  7
+```
+
+If full sanitized snapshots already exist, rebuild only the compact projection:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --build-direct-history \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/direct-history.json.gz \
+  7 \
+  /absolute/private/full-snapshot-archive/*.json.gz
+```
+
+The full-snapshot directory is intentionally outside the public repository. It
+is the replaceable bridge to a future durable provider backed by ADX, blob
+storage, or restored public history. `IBenchmarkHistoryProvider` keeps the
+explorer's exact merge/comparison semantics independent of that storage choice.
+
 For already acquired files, the lower-level manifest importer remains
 available:
 
@@ -423,6 +497,9 @@ running the app does not.
   local caching with stale-cache fallback during network failures.
 - `Data/DirectRunAcquirer.cs` discovers the four AzDO/Helix lanes, validates
   authenticated result artifacts, and keeps its raw cache outside the repo.
+- `Data/DirectHistoryArchive.cs` projects retained compact history from full
+  sanitized snapshots, enforces completeness/retention, and exposes the bundled
+  provider abstraction used by the explorer and cross-build trend.
 - `Data/BuildSnapshotImporter.cs` allowlists BDN or combined perf-lab
   statistics and exact identity into compressed same-build snapshots;
   `BuildComparison.cs` accounts for coverage and calculates strict common-set

@@ -6,7 +6,7 @@
 <PageTitle>Wasm benchmark history</PageTitle>
 
 <section class="hero">
-    <p class="eyebrow">PUBLIC PERFORMANCE DATA</p>
+    <p class="eyebrow">PUBLISHED + DIRECT PERFORMANCE DATA</p>
     <h1>Compare .NET Wasm performance across runtime modes.</h1>
     <p class="lede">
         Explore primary microbenchmark histories from <strong>dotnet/performance</strong>.
@@ -210,7 +210,8 @@ else
     {
         <div class="state-banner direct-source" role="status">
             <strong>Temporary direct-run data.</strong>
-            <span>@DirectObservationCount direct Helix snapshot observation(s) are merged with published history.
+            <span>@DirectObservationCount direct Helix snapshot observation(s) from @DirectObservationRange
+                are merged with published history.
                 Equivalent points prefer the published source; conflicts fail visibly. R2R is not a continuous trend,
                 and variability is not computed until enough direct snapshots exist.</span>
         </div>
@@ -390,6 +391,18 @@ else
 
     private int DirectObservationCount => _histories.Sum(history =>
         history.Observations.Count(observation => observation.Source == ObservationSource.DirectSnapshot));
+    private string DirectObservationRange
+    {
+        get
+        {
+            var timestamps = _histories.SelectMany(history => history.Observations)
+                .Where(observation => observation.Source == ObservationSource.DirectSnapshot)
+                .Select(observation => observation.Timestamp).ToArray();
+            return timestamps.Length == 0
+                ? "no retained builds"
+                : $"{timestamps.Min():yyyy-MM-dd} through {timestamps.Max():yyyy-MM-dd}";
+        }
+    }
     private string[] DataConflicts => _histories.SelectMany(history => history.DataConflicts ?? [])
         .Distinct(StringComparer.Ordinal).ToArray();
 

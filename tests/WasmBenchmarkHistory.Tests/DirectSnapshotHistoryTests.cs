@@ -38,6 +38,23 @@ public sealed class DirectSnapshotHistoryTests
     }
 
     [Fact]
+    public void CompactR2RHistoryRetainsBuildAndPartitionButNotRawSamples()
+    {
+        var snapshot = Snapshot("3074629", Measurement("Run", 10));
+        var archive = DirectHistoryArchiveBuilder.Create(
+            [snapshot], 7, DateTimeOffset.Parse("2026-09-14T00:00:00Z"));
+
+        var history = DirectSnapshotHistory.CreateHistory(
+            "N.T.Run", KnownRunConfigurations.Get("coreclr-wasm-r2r"), archive.Builds);
+
+        var observation = Assert.Single(history!.Observations);
+        Assert.Equal("3074629", observation.BuildId);
+        Assert.Equal("Partition0", observation.Partition);
+        Assert.Equal("Direct Helix snapshot", observation.SourceLabel);
+        Assert.Null(observation.Samples);
+    }
+
+    [Fact]
     public void MergePrefersEquivalentPublishedObservationAndRejectsConflict()
     {
         var timestamp = new DateTime(2026, 9, 13, 14, 59, 42);
@@ -104,7 +121,7 @@ public sealed class DirectSnapshotHistoryTests
             "2026-09-13T14:59:42+00:00");
         var lanes = BuildComparison.LaneIds.Select(lane => new BuildLane(
             new(lane, lane, Guid.Empty.ToString(), build, "12", "unavailable", "unavailable",
-                "RunKind=micro", 15),
+                "RunKind=micro", 1),
             [new("Partition0", "passed", "", 1, 1, 0)],
             [measurement])).ToArray();
         return new(1, build, lanes, [], "Direct Helix snapshot",

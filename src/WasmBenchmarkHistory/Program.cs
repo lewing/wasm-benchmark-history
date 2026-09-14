@@ -7,6 +7,7 @@ if (args.Length > 0 && args[0] == "--discover-build")
         throw new ArgumentException("Usage: --discover-build <internal-build-url-or-id>");
     var discovery = await new DirectRunAcquirer().DiscoverAsync(args[1]);
     Console.WriteLine($"Build {discovery.Build.BuildId} ({discovery.Build.BuildNumber})");
+    Console.WriteLine($"Runtime {discovery.Build.RuntimeSha}; performance {discovery.Build.PerformanceSha}");
     foreach (var lane in discovery.Lanes)
     {
         if (lane.HelixJobId is null)
@@ -34,6 +35,34 @@ if (args.Length > 0 && args[0] == "--acquire-build")
         $"{comparison.Common.Length} valid four-runtime matches.");
     foreach (var coverage in comparison.Coverage)
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(coverage));
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--build-direct-history")
+{
+    if (args.Length < 4 || !int.TryParse(args[2], out var retention))
+        throw new ArgumentException(
+            "Usage: --build-direct-history <output.json.gz> <retention> <full-snapshot.json.gz> [...]");
+    var archive = await DirectHistoryRefresh.BuildAsync(
+        args.Skip(3), args[1], retention, DateTimeOffset.UtcNow);
+    Console.WriteLine($"Direct history: {archive.Builds.Length} retained builds, " +
+        $"{archive.Exclusions.Length} excluded or pruned.");
+    foreach (var exclusion in archive.Exclusions)
+        Console.WriteLine($"Excluded {exclusion.BuildId}: {exclusion.Reason}");
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--refresh-direct-history")
+{
+    if (args.Length < 4 || !int.TryParse(args[3], out var retention))
+        throw new ArgumentException(
+            "Usage: --refresh-direct-history <output.json.gz> <full-archive-directory> <retention> [build-id-or-url ...]");
+    var archive = await DirectHistoryRefresh.RefreshAsync(
+        args.Skip(4), args[2], args[1], retention);
+    Console.WriteLine($"Direct history: {archive.Builds.Length} retained builds, " +
+        $"{archive.Exclusions.Length} excluded or pruned.");
+    foreach (var exclusion in archive.Exclusions)
+        Console.WriteLine($"Excluded {exclusion.BuildId}: {exclusion.Reason}");
     return;
 }
 
@@ -85,6 +114,9 @@ builder.Services.AddHttpClient<PerfAutofilingIssueClient>((services, client) =>
     AllowAutoRedirect = false
 });
 builder.Services.AddSingleton<BuildSnapshotStore>();
+builder.Services.AddSingleton<BundledDirectHistoryProvider>();
+builder.Services.AddSingleton<IBenchmarkHistoryProvider>(
+    services => services.GetRequiredService<BundledDirectHistoryProvider>());
 
 var app = builder.Build();
 

@@ -72,4 +72,34 @@ public sealed class BuildSnapshotDataTests
         Assert.All(result.Coverage, value => Assert.Equal(0, value.Duplicates));
         Assert.All(result.Coverage, value => Assert.Equal(0, value.Unidentified));
     }
+
+    [Fact]
+    public async Task DirectHistory_RetainsSevenCompleteBuildsAndRecordsExclusions()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "DataSets", "direct-history.json.gz");
+        var archive = await DirectHistoryArchiveBuilder.ReadAsync(path);
+
+        Assert.True(new FileInfo(path).Length < 8_000_000);
+        Assert.Equal(
+            ["3068640", "3069775", "3070008", "3070235", "3074299", "3074425", "3074629"],
+            archive.Builds.Select(build => build.Build.BuildId));
+        Assert.Equal(["3071174", "3071763", "3072440"],
+            archive.Exclusions.Select(value => value.BuildId));
+        Assert.All(archive.Builds, build => Assert.All(build.Lanes, lane =>
+        {
+            Assert.Equal(lane.ExpectedPartitions, lane.Partitions.Length);
+            Assert.All(lane.Partitions, partition => Assert.True(partition.Measurements > 0));
+        }));
+        Assert.All(archive.Builds.SelectMany(build => build.Lanes)
+            .SelectMany(lane => lane.Measurements),
+            measurement => Assert.True(measurement.N is null or > 0));
+
+        var trend = DirectHistoryTrend.Create(
+            archive, "System.Tests.Perf_Random.Next_int_unseeded");
+        Assert.Equal(7, trend.Length);
+        Assert.True(trend[0].Cells["coreclr-r2r"].Mean > 2_500);
+        Assert.InRange(trend[^1].Cells["coreclr-r2r"].Mean!.Value, 30, 35);
+        Assert.True(trend.Single(row => row.Build.BuildId == "3074299")
+            .Cells["coreclr-r2r"].SpeedupVsPrevious > 40);
+    }
 }

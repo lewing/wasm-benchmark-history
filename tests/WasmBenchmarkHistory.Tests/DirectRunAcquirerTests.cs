@@ -56,6 +56,22 @@ public sealed class DirectRunAcquirerTests
     }
 
     [Fact]
+    public void ParseCandidateBuildIds_FiltersAndOrdersExpectedPipelineBuilds()
+    {
+        using var builds = JsonDocument.Parse("""
+            {"results":[
+              {"id":3,"status":"completed","sourceBranch":"refs/heads/main","definition":{"id":702}},
+              {"id":5,"status":"inProgress","sourceBranch":"refs/heads/main","definition":{"id":702}},
+              {"id":4,"status":"completed","sourceBranch":"refs/heads/release","definition":{"id":702}},
+              {"id":2,"status":"completed","sourceBranch":"refs/heads/main","definition":{"id":702}},
+              {"id":6,"status":"completed","sourceBranch":"refs/heads/main","definition":{"id":999}}
+            ]}
+            """);
+
+        Assert.Equal(["3", "2"], DirectRunAcquirer.ParseCandidateBuildIds(builds.RootElement, 10));
+    }
+
+    [Fact]
     public void ParseTimeline_RejectsDuplicateExpectedLane()
     {
         using var timeline = JsonDocument.Parse("""
@@ -140,7 +156,7 @@ public sealed class DirectRunAcquirerTests
     [Fact]
     public void BuildSelector_OrdersNumericBuildIdsNewestFirst()
     {
-        Assert.Equal(["3074629", "3074425", "3068640", "local"],
+        Assert.Equal(["3074629", "3074425", "3068640"],
             BuildSnapshotStore.OrderBuildIds(["3068640", "local", "3074425", "3074629"]));
     }
 

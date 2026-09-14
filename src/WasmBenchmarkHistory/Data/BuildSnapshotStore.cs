@@ -16,8 +16,11 @@ public sealed class BuildSnapshotStore(IWebHostEnvironment environment)
         : [];
 
     public static string[] OrderBuildIds(IEnumerable<string> buildIds) =>
-        buildIds.OrderByDescending(id => long.TryParse(id, out var value) ? value : long.MinValue)
-            .ThenByDescending(id => id, StringComparer.Ordinal).ToArray();
+        buildIds.Select(id => (Id: id, Numeric: long.TryParse(id, out var value) ? value : (long?)null))
+            .Where(value => value.Numeric is not null)
+            .OrderByDescending(value => value.Numeric)
+            .ThenByDescending(value => value.Id, StringComparer.Ordinal)
+            .Select(value => value.Id).ToArray();
 
     public Task<BuildSnapshot> LoadAsync(string buildId)
     {

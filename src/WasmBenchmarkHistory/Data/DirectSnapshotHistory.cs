@@ -3,6 +3,29 @@ namespace WasmBenchmarkHistory.Data;
 public static class DirectSnapshotHistory
 {
     public static IReadOnlyDictionary<string, IReadOnlySet<string>> GetAvailability(
+        IEnumerable<DirectHistoryBuild> builds)
+    {
+        var availability = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var build in builds)
+        {
+            foreach (var lane in build.Lanes)
+            {
+                var runId = RunId(lane.Id);
+                foreach (var measurement in ValidUnique(lane.Measurements))
+                {
+                    if (!availability.TryGetValue(measurement.Identity.DisplayName, out var runs))
+                    {
+                        runs = new HashSet<string>(StringComparer.Ordinal);
+                        availability.Add(measurement.Identity.DisplayName, runs);
+                    }
+                    runs.Add(runId);
+                }
+            }
+        }
+        return Freeze(availability);
+    }
+
+    public static IReadOnlyDictionary<string, IReadOnlySet<string>> GetAvailability(
         IEnumerable<BuildSnapshot> snapshots)
     {
         var availability = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -23,10 +46,43 @@ public static class DirectSnapshotHistory
                 }
             }
         }
-        return availability.ToDictionary(
-            pair => pair.Key,
-            pair => (IReadOnlySet<string>)pair.Value,
-            StringComparer.Ordinal);
+        return Freeze(availability);
+    }
+
+    public static BenchmarkHistory? CreateHistory(
+        string benchmark,
+        RunConfiguration run,
+        IEnumerable<DirectHistoryBuild> builds)
+    {
+        var laneId = LaneId(run.Id);
+        var observations = new List<BenchmarkObservation>();
+        foreach (var build in builds)
+        {
+            var lane = build.Lanes.Single(value => value.Id == laneId);
+            var matches = lane.Measurements.Where(value =>
+                value.Identity.DisplayName == benchmark && value.InvalidReason is null).ToArray();
+            if (matches.Length > 1)
+                throw Conflict(benchmark, run.Id, "duplicate direct history measurements");
+            if (matches.Length == 0)
+                continue;
+            var timestamp = ParseTimestamp(build.Build);
+            var measurement = matches[0];
+            observations.Add(new BenchmarkObservation(
+                benchmark,
+                run.Id,
+                timestamp,
+                measurement.Mean!.Value,
+                measurement.Error,
+                build.Build.RuntimeSha,
+                build.Build.PerformanceSha,
+                $"{build.CaptureSource} · build {build.Build.BuildNumber}",
+                ObservationSource.DirectSnapshot,
+                build.Build.BuildId,
+                null,
+                measurement.Partition,
+                build.CaptureSource));
+        }
+        return CreateHistory(benchmark, run, observations);
     }
 
     public static BenchmarkHistory? CreateHistory(
@@ -47,16 +103,11 @@ public static class DirectSnapshotHistory
                 throw Conflict(benchmark, run.Id, "duplicate direct snapshot measurements");
             if (matches.Length == 0)
                 continue;
-            if (!DateTimeOffset.TryParse(snapshot.Build.SourceDate,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.RoundtripKind,
-                    out var timestamp))
-                throw Conflict(benchmark, run.Id, "invalid direct snapshot timestamp");
             var measurement = matches[0];
             observations.Add(new BenchmarkObservation(
                 benchmark,
                 run.Id,
-                DateTime.SpecifyKind(timestamp.UtcDateTime, DateTimeKind.Unspecified),
+                ParseTimestamp(snapshot.Build),
                 measurement.Statistics.Mean!.Value,
                 measurement.Statistics.StandardError,
                 snapshot.Build.RuntimeSha,
@@ -64,13 +115,11 @@ public static class DirectSnapshotHistory
                 $"{snapshot.CaptureSource} · build {snapshot.Build.BuildNumber}",
                 ObservationSource.DirectSnapshot,
                 snapshot.Build.BuildId,
-                measurement.Statistics.OriginalValues));
+                measurement.Statistics.OriginalValues,
+                measurement.Partition,
+                snapshot.CaptureSource));
         }
-        if (observations.Count == 0)
-            return null;
-        var merged = MergeObservations(benchmark, run.Id, [], observations);
-        return new BenchmarkHistory(
-            benchmark, run, "Direct Helix snapshots", merged.Observations, merged.Conflicts);
+        return CreateHistory(benchmark, run, observations);
     }
 
     public static ObservationMergeResult MergeObservations(
@@ -135,6 +184,41 @@ public static class DirectSnapshotHistory
     private static BenchmarkDataException Conflict(string benchmark, string runId, string detail) =>
         new(BenchmarkDataError.Schema,
             $"Direct snapshot conflict for '{benchmark}' in '{runId}': {detail}.");
+
+    private static BenchmarkHistory? CreateHistory(
+        string benchmark,
+        RunConfiguration run,
+        IReadOnlyList<BenchmarkObservation> observations)
+    {
+        if (observations.Count == 0)
+            return null;
+        var merged = MergeObservations(benchmark, run.Id, [], observations);
+        return new BenchmarkHistory(
+            benchmark, run, "Direct Helix snapshots", merged.Observations, merged.Conflicts);
+    }
+
+    private static IEnumerable<DirectHistoryMeasurement> ValidUnique(
+        IEnumerable<DirectHistoryMeasurement> measurements) =>
+        measurements.GroupBy(value => value.Identity.Key, StringComparer.Ordinal)
+            .Where(group => group.Count() == 1 && group.Single().InvalidReason is null)
+            .Select(group => group.Single());
+
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> Freeze(
+        Dictionary<string, HashSet<string>> availability) =>
+        availability.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlySet<string>)pair.Value,
+            StringComparer.Ordinal);
+
+    private static DateTime ParseTimestamp(BuildProvenance build)
+    {
+        if (!DateTimeOffset.TryParse(build.SourceDate,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var timestamp))
+            throw new InvalidDataException($"Build {build.BuildId} has an invalid direct snapshot timestamp.");
+        return DateTime.SpecifyKind(timestamp.UtcDateTime, DateTimeKind.Unspecified);
+    }
 
     public static string RunId(string laneId) => laneId switch
     {

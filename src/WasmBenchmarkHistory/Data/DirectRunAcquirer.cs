@@ -61,6 +61,22 @@ public sealed class DirectRunAcquirer
         return new DirectRunDiscovery(buildUrl, provenance, lanes, performanceSha);
     }
 
+    public async Task<string[]> DiscoverCandidateBuildsAsync(int maximum = 21)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximum, 1);
+        using var builds = await _cli.RunJsonAsync(
+        [
+            "azdo", "builds",
+            "--org", "dnceng",
+            "--project", "internal",
+            "--definition-id", "702",
+            "--branch", "refs/heads/main",
+            "--top", maximum.ToString(),
+            "--json"
+        ]);
+        return ParseCandidateBuildIds(builds.RootElement, maximum);
+    }
+
     public async Task<BuildSnapshot> AcquireAsync(
         string buildIdOrUrl, string outputPath, string? cacheDirectory = null)
     {
@@ -210,6 +226,22 @@ public sealed class DirectRunAcquirer
             return new DiscoveredLane(definition.Id, definition.DisplayName,
                 RequiredText(job.Record, "name"), id, null);
         }).ToArray();
+    }
+
+    public static string[] ParseCandidateBuildIds(JsonElement document, int maximum)
+    {
+        if (!document.TryGetProperty("results", out var results) ||
+            results.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Azure DevOps build listing has no results array.");
+        return results.EnumerateArray()
+            .Where(build => Text(build, "status") == "completed" &&
+                build.TryGetProperty("definition", out var definition) &&
+                definition.TryGetProperty("id", out var id) && id.GetInt32() == 702 &&
+                Text(build, "sourceBranch") == "refs/heads/main")
+            .OrderByDescending(build => build.GetProperty("id").GetInt32())
+            .Take(maximum)
+            .Select(build => build.GetProperty("id").GetInt32().ToString())
+            .ToArray();
     }
 
     public static string ParseHelixJobId(string log)
@@ -392,6 +424,8 @@ public sealed class DirectRunAcquirer
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
         var combined = document.RootElement.ValueKind == JsonValueKind.Array;
+        if (combined && document.RootElement.GetArrayLength() == 0)
+            return new ReportProvenance(IsCombined: true);
         var root = combined &&
             document.RootElement.GetArrayLength() > 0
             ? document.RootElement[0]

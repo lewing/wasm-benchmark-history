@@ -109,7 +109,8 @@
                     @foreach (var series in Series)
                     {
                         @if (series.History.Observations.Any(
-                            observation => observation.Source == ObservationSource.PublishedHistory))
+                            observation => observation.Source == ObservationSource.PublishedHistory) ||
+                            series.History.Observations.Count >= 3)
                         {
                             @foreach (var segment in PointSegments(series.Points))
                             {
@@ -292,7 +293,8 @@
                                     <div>
                                         <dt>source</dt>
                                         <dd>@(point.Observation.Source == ObservationSource.DirectSnapshot
-                                            ? $"Direct Helix snapshot · build {point.Observation.BuildId}"
+                                            ? $"{point.Observation.SourceLabel ?? "Direct snapshot"} · build {point.Observation.BuildId}" +
+                                                (point.Observation.Partition is null ? "" : $" · {point.Observation.Partition}")
                                             : "Published allTestHistory")</dd>
                                     </div>
                                     @if (point.Observation.Samples is { Count: > 0 } samples)
