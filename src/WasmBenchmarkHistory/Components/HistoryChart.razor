@@ -245,6 +245,7 @@
                         @foreach (var point in _hover.Points)
                         {
                             var identity = ObservationIdentity.From(point.Observation);
+                            var unit = DurationFormatter.SelectUnit(point.Observation.Value);
                             <section>
                                 <div class="hover-run-heading">
                                     <i style="background:@point.History.Run.Color"></i>
@@ -256,12 +257,26 @@
                                 </div>
                                 <div class="hover-measure">
                                     <span>Value</span>
-                                    <strong>@FormatValue(point.Observation.Value)@FormatError(point.Observation.Error)</strong>
+                                    <strong title="@DurationFormatter.FormatExactNanoseconds(point.Observation.Value)"
+                                            aria-label="@DurationFormatter.FormatExactNanoseconds(point.Observation.Value)">
+                                        @DurationFormatter.Format(point.Observation.Value, unit)
+                                        @if (point.Observation.Error is not null)
+                                        {
+                                            <text> ± @DurationFormatter.Format(point.Observation.Error.Value, unit)</text>
+                                        }
+                                    </strong>
                                     @if (point.StrictRatio is not null)
                                     {
                                         <em>@point.StrictRatio.Value.ToString("0.000×", CultureInfo.InvariantCulture)</em>
                                     }
                                 </div>
+                                <small class="exact-value">
+                                    Exact: @DurationFormatter.FormatExactNanoseconds(point.Observation.Value)
+                                    @if (point.Observation.Error is not null)
+                                    {
+                                        <text> ± @DurationFormatter.FormatExactNanoseconds(point.Observation.Error)</text>
+                                    }
+                                </small>
                                 @if (ShowVariabilityBand)
                                 {
                                     var variability = FindVariabilityPoint(
@@ -269,9 +284,11 @@
                                         point.Observation.Timestamp);
                                     @if (variability is not null)
                                     {
+                                        var variabilityUnit = DurationFormatter.SelectUnit(variability.Median);
                                         <div class="hover-variability">
-                                            <span>rolling median @FormatValue(variability.Median)</span>
-                                            <span>Q1–Q3 @FormatValue(variability.FirstQuartile)–@FormatValue(variability.ThirdQuartile)</span>
+                                            <span>rolling median @DurationFormatter.Format(variability.Median, variabilityUnit)</span>
+                                            <span>Q1–Q3 @DurationFormatter.Format(variability.FirstQuartile, variabilityUnit)–
+                                                @DurationFormatter.Format(variability.ThirdQuartile, variabilityUnit)</span>
                                             <span>relative IQR @FormatPercent(RelativeIqr(variability))</span>
                                             <span>n=@variability.SampleCount</span>
                                         </div>
@@ -906,18 +923,12 @@
     private string FormatAxisValue(double value) =>
         Normalized
             ? value.ToString("0.000×", CultureInfo.InvariantCulture)
-            : value.ToString(Math.Abs(value) >= 100 ? "N0" : "0.###", CultureInfo.InvariantCulture);
+            : DurationFormatter.Format(value, DurationFormatter.SelectUnit(MinY, MaxY));
 
     private static string FormatDate(long ticks) =>
         new DateTime(ticks, DateTimeKind.Unspecified).ToString("MMM d\nyyyy", CultureInfo.InvariantCulture);
 
     private static string ShortSha(string sha) => sha.Length <= 10 ? sha : sha[..10];
-
-    private static string FormatValue(double value) =>
-        value.ToString(Math.Abs(value) >= 100 ? "N2" : "0.####", CultureInfo.InvariantCulture);
-
-    private static string FormatError(double? error) =>
-        error is null ? string.Empty : $" ± {FormatValue(error.Value)}";
 
     private static string FormatPercent(double value) =>
         double.IsFinite(value)

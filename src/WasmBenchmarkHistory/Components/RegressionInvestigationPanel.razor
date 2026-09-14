@@ -266,13 +266,27 @@
     }
 
     private RenderFragment ObservationDetails(BenchmarkObservation observation) => @<div class="observation-details">
+        @{
+            var unit = DurationFormatter.SelectUnit(observation.Value);
+        }
         <div class="observation-value">
-            <strong>@FormatValue(observation.Value)</strong>
+            <strong title="@DurationFormatter.FormatExactNanoseconds(observation.Value)">
+                @DurationFormatter.Format(observation.Value, unit)
+            </strong>
             @if (observation.Error is not null)
             {
-                <span>± @FormatValue(observation.Error.Value)</span>
+                <span title="@DurationFormatter.FormatExactNanoseconds(observation.Error)">
+                    ± @DurationFormatter.Format(observation.Error.Value, unit)
+                </span>
             }
         </div>
+        <small>
+            Exact @DurationFormatter.FormatExactNanoseconds(observation.Value)
+            @if (observation.Error is not null)
+            {
+                <text> ± @DurationFormatter.FormatExactNanoseconds(observation.Error)</text>
+            }
+        </small>
         <time datetime="@observation.Timestamp.ToString("s", CultureInfo.InvariantCulture)">
             @observation.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
         </time>
@@ -284,10 +298,14 @@
     </div>;
 
     private RenderFragment WindowDetails(string label, RobustWindowSummary summary) => @<article>
+        @{
+            var unit = DurationFormatter.SelectUnit(summary.Median);
+        }
         <span>@label</span>
-        <strong>median @FormatValue(summary.Median)</strong>
-        <small>n=@summary.Count · IQR @FormatValue(summary.InterquartileRange)</small>
-        <small>Q1 @FormatValue(summary.FirstQuartile) · Q3 @FormatValue(summary.ThirdQuartile)</small>
+        <strong>median @DurationFormatter.Format(summary.Median, unit)</strong>
+        <small>n=@summary.Count · IQR @DurationFormatter.Format(summary.InterquartileRange, unit)</small>
+        <small>Q1 @DurationFormatter.Format(summary.FirstQuartile, unit) ·
+            Q3 @DurationFormatter.Format(summary.ThirdQuartile, unit)</small>
     </article>;
 
     private Task ChangeSummaryAsync(bool robust) =>
@@ -308,9 +326,6 @@
 
     private static string ShortSha(string sha) => sha.Length <= 10 ? sha : sha[..10];
 
-    private static string FormatValue(double value) =>
-        value.ToString(Math.Abs(value) >= 100 ? "N2" : "0.####", CultureInfo.InvariantCulture);
-
     private static string FormatSigned(double value) =>
-        value.ToString("+0.####;-0.####;0", CultureInfo.InvariantCulture);
+        (value > 0 ? "+" : "") + DurationFormatter.Format(value);
 }
