@@ -16,8 +16,8 @@ dotnet restore WasmBenchmarkHistory.slnx
 dotnet run --project src/WasmBenchmarkHistory
 ```
 
-Open the URL printed by ASP.NET Core, search for a benchmark, select two or
-three available run configurations, and choose **Compare histories**. The chart
+Open the URL printed by ASP.NET Core, search for a benchmark, select two to
+four available run configurations, and choose **Compare histories**. The chart
 can show complete raw histories or normalize strict matched observations to the
 first selected run. Hover the chart to inspect the nearest timestamp, or focus
 it and use the left/right arrow, Home, and End keys. The detail card reports
@@ -71,6 +71,42 @@ Benchmark, selected runs, chart mode/range, variability-band settings,
 investigation run, summary method, and exact A/B identities are encoded in the
 query string. Reloading or sharing the URL restores valid state; malformed,
 unavailable, or ambiguous fields are ignored with an on-page explanation.
+
+Installed direct Helix snapshots augment the catalog and history chart. The
+three published runs merge direct points by the existing strict key
+(`timestamp + runtime SHA + performance SHA`); an equivalent published point
+wins, while a value or duplicate-cardinality conflict is surfaced instead of
+silently selecting one. **CoreCLR Wasm R2R (direct snapshots)** is available
+only for benchmark identities with valid direct measurements. Direct points
+use diamond markers, retain raw samples and errors, and show their snapshot/build
+source in the hover card. A single R2R point is not presented as a continuous
+trend; fewer than three direct points are marker-only, and rolling variability
+still requires the configured minimum observation window.
+
+The bundled `DataSets/direct-history.json.gz` file is a temporary compact
+latest-build cache, not the canonical direct-run model. It is deterministically
+projected from full sanitized snapshots and retains exact benchmark identity,
+lane/build/partition provenance, mean, standard error, variance, sample count,
+validity, runtime/performance SHAs, and measurement timestamp. Raw sample arrays
+remain in full sanitized snapshots but are omitted from this bundled projection.
+The current retention policy is the latest **7 verified complete builds**.
+
+The current 6.6 MiB compact archive is about 80% smaller than the corresponding
+seven full gzip snapshots and retains these measurement timestamps:
+
+| Build | Build number | Timestamp (UTC) | Coverage note |
+|---|---|---|---|
+| 3068640 | `20260907.2` | 2026-09-07 09:35:50 | 60/60; one R2R upload-only failure recovered |
+| 3069775 | `20260908.3` | 2026-09-08 16:00:24 | 60/60 passed |
+| 3070008 | `20260908.6` | 2026-09-08 18:56:23 | 60/60; one CoreCLR interpreter artifact recovered |
+| 3070235 | `20260908.8` | 2026-09-08 23:42:47 | 60/60 passed |
+| 3074299 | `20260912.5` | 2026-09-12 19:04:14 | 60/60 passed |
+| 3074425 | `20260912.6` | 2026-09-13 03:54:51 | 60/60 passed |
+| 3074629 | `20260913.1` | 2026-09-13 14:59:42 | 60/60 passed |
+
+Builds 3071174, 3071763, and 3072440 were inspected but excluded:
+3071174 lacks usable artifacts for one Mono AOT and one CoreCLR interpreter
+partition, while the latter two have empty R2R reports in all 15 partitions.
 
 ## Autofiled change-set prototype
 
@@ -142,14 +178,17 @@ unsupported runs, and exact-match failures are surfaced as errors.
 Open **Four-runtime comparison** (`/compare-builds`) to compare imported results
 for Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R. This view
 does not depend on public historical indexes having a ReadyToRun lane. It keeps
-official same-build measurements separate from earlier one-iteration ColdStart
-experiments and leaves the historical chart's strict matching unchanged.
+same-build calculations separate from earlier one-iteration ColdStart
+experiments. Sanitized snapshot observations also augment the historical chart
+through its existing strict matching model.
 
-The coverage table accounts for the union of benchmark identities. The six
+The coverage table accounts for the union of benchmark identities. Full BDN
+reports use their structured namespace/type/method/parameter identity; combined
+perf-lab reports use their exact canonical test name without heuristic
+rewriting. The six
 pairwise geometric means all use the **same four-way common set**, excluding
-missing, invalid, and duplicate identities. Identity is the exact BDN namespace,
-type, method, and parameter string, never the BDN job ID or display name.
-Parameter strings are not heuristically rewritten. Multiple reports for an
+missing, invalid, and duplicate identities. Identity never uses a BDN job ID.
+Multiple reports for an
 identity are flagged as duplicates, even if their means agree; no arbitrary
 winner is selected. Records without a structured identity are counted as
 unidentified, not guessed from `FullName`. BDN's valid `Namespace: null` means
@@ -176,7 +215,40 @@ Different machines, measurement counts, and benchmark variability limit the
 interpretation of a single build. These descriptive speedups are not statistical
 significance claims.
 
-### Included snapshot: build 3068640
+### Included snapshots
+
+#### Build 3074629
+
+`DataSets/3074629.json.gz` is a **Direct Helix snapshot** of build
+`20260913.1` from September 13, 2026. All four Wasm jobs completed all 15
+benchmark partitions successfully:
+
+| Runtime | Helix job | Valid | Invalid | Absent from lane |
+|---|---|---:|---:|---:|
+| Mono interpreter | `af4eb385-40ac-4b96-b97c-dc9d38abebdd` | 5,682 | 1 | 2 |
+| Mono AOT | `7098afbe-560e-41e7-be39-ccaabf847d46` | 5,288 | 2 | 395 |
+| CoreCLR interpreter | `9a1d9497-cd98-4464-ac0b-44cb55012a41` | 5,622 | 22 | 41 |
+| CoreCLR R2R | `120a7f50-3d56-4411-bb20-1ec7b3ab753b` | 5,640 | 4 | 41 |
+
+Of 5,685 identities in the union, **5,244** have valid results in all four
+modes. There are no duplicates or unidentified entries. The target runtime SHA
+is `3c4631e63b1de4308e2965b149992b992c9f5318`; the performance SHA is
+`743c3c623a09044b4833d2c2766bb77b4c8cce8e`. Combined perf-lab reports preserve
+the default top-counter samples, from which the snapshot computes mean, median,
+sample variance, standard deviation, standard error, minimum, and maximum.
+V8 and workload-manifest versions are not present in these combined artifacts
+and remain explicitly unavailable rather than being inferred.
+
+| Baseline | Candidate | Common-set speedup |
+|---|---|---:|
+| Mono interpreter | Mono AOT | 3.472112x |
+| Mono interpreter | CoreCLR interpreter | 0.041090x |
+| Mono interpreter | CoreCLR R2R | 0.269343x |
+| Mono AOT | CoreCLR interpreter | 0.011834x |
+| Mono AOT | CoreCLR R2R | 0.077573x |
+| CoreCLR interpreter | CoreCLR R2R | 6.555008x |
+
+#### Build 3068640
 
 `DataSets/3068640.json.gz` contains build `20260907.2` from September 7, 2026:
 all **60/60 benchmark partitions**, 11,100 full BDN reports, and 22,261 benchmark
@@ -227,9 +299,92 @@ iterations, and one warmup. Some cases export `IterationCount=6` and
 per-benchmark settings preserve these exceptions rather than substituting a
 uniform configuration.
 
-### Import a build
+### Refresh from an internal build
 
-The application includes a reusable local BenchmarkDotNet importer:
+The application includes a dependency-light acquisition command. It validates
+the internal build host, pipeline definition/name, main branch, four expected
+Wasm job names, Helix GUIDs, partition names, report hosts, report shapes, commit
+SHAs, and output extension. It downloads only combined perf-lab or full BDN JSON
+result artifacts and feeds them through the same allowlisted importer used by
+the checked-in snapshots:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --acquire-build 'https://dev.azure.com/dnceng/internal/_build/results?buildId=BUILD_ID' \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/BUILD_ID.json.gz
+```
+
+Use `--discover-build URL_OR_ID` for a read-only job/partition inventory before
+downloading. The command runs `dotnet dnx -y lewing.helix.mcp` from the system
+temporary directory. Authenticate Azure DevOps for `dnceng/internal` and store
+a valid `helix.dot.net` credential with that tool before running it. Helix
+access is required; ADX is not used.
+
+The raw cache defaults to the operating system's local application-data
+directory under `wasm-benchmark-history/direct-runs/BUILD_ID`. Override it with
+`--cache /absolute/private/cache`; repository-local cache paths are rejected.
+The cache contains private source artifacts and must never be committed. The
+tracked output is a new gzip JSON document constructed from an explicit
+allowlist. It never copies machine/account IDs, correlation IDs, raw
+`additionalData`, logs, binlogs, URLs, SAS queries, tokens, or credentials.
+A final sensitive-string scan rejects prohibited internal content before write.
+
+The exporter prints per-lane coverage and the six common-set speedups.
+`DataSets/*.json.gz` ship with build/publish output, populate `/compare-builds`,
+and contribute exact direct observations to the main benchmark explorer.
+Refresh remains a manual maintainer operation after a successful build; this is
+not an automatic replacement for the public allTestHistory pipeline.
+
+To refresh the retained multi-build series and keep reusable full sanitized run
+data outside the repository:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --refresh-direct-history \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/direct-history.json.gz \
+  /absolute/private/full-snapshot-archive \
+  7 \
+  3068640 3069775 3070008 3070235 3071174 \
+  3071763 3072440 3074299 3074425 3074629
+```
+
+The command discovers and validates each build, writes full allowlisted
+snapshots (including retained sample arrays) to the configurable private archive,
+then derives and replaces the compact checked-in series. Builds with incomplete
+lane/partition artifact coverage are excluded explicitly; complete reports from
+upload-only failed work items remain eligible. Retention is applied by
+measurement timestamp, then build ID, so repeated refreshes order and prune the
+same input deterministically.
+
+Omit the build IDs to have the command query recent completed
+`dotnet-runtime-perf` definition 702 main builds and continue newest-first until
+it finds the requested number of complete runs:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --refresh-direct-history \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/direct-history.json.gz \
+  /absolute/private/full-snapshot-archive \
+  7
+```
+
+If full sanitized snapshots already exist, rebuild only the compact projection:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --build-direct-history \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets/direct-history.json.gz \
+  7 \
+  /absolute/private/full-snapshot-archive/*.json.gz
+```
+
+The full-snapshot directory is intentionally outside the public repository. It
+is the replaceable bridge to a future durable provider backed by ADX, blob
+storage, or restored public history. `IBenchmarkHistoryProvider` keeps the
+explorer's exact merge/comparison semantics independent of that storage choice.
+
+For already acquired files, the lower-level manifest importer remains
+available:
 
 ```bash
 dotnet run --project src/WasmBenchmarkHistory -- \
@@ -237,13 +392,8 @@ dotnet run --project src/WasmBenchmarkHistory -- \
   /absolute/repo/src/WasmBenchmarkHistory/DataSets/BUILD_ID.json.gz
 ```
 
-The importer reads full BDN JSON reports (`Benchmarks` with structured identity
-and `Statistics`), prints coverage and six speedups, and writes a compressed
-allowlisted snapshot. `DataSets/*.json.gz` ship with build/publish output and
-populate the build selector. Raw logs and acquisition caches must stay outside
-the repository.
-
-The manifest shape is:
+It accepts either full BDN reports or combined perf-lab report arrays. The
+manifest shape is:
 
 ```json
 {
@@ -281,7 +431,9 @@ The manifest shape is:
       ]
     }
   ],
-  "caveats": ["Public-safe hardware and measurement comparability notes."]
+  "caveats": ["Public-safe hardware and measurement comparability notes."],
+  "captureSource": "Direct Helix snapshot",
+  "capturedAt": "2026-09-13T23:30:00Z"
 }
 ```
 
@@ -321,8 +473,9 @@ running the app does not.
   local and sends one completed range to the server.
 - `Components/RegressionInvestigationPanel.razor` keeps within-run temporal
   analysis visually and semantically separate from strict runtime comparison.
-- `Data/BenchmarkIndexParser.cs` catalogs links from the three small index
-  pages. History pages are fetched only after a benchmark is selected.
+- `Data/BenchmarkIndexParser.cs` catalogs links from the three published index
+  pages. `DirectSnapshotHistory.cs` adds valid snapshot identities and merges
+  exact direct observations only after a benchmark is selected.
 - `Data/BenchmarkHistoryParser.cs` extracts the `defaultCounter` primary trace
   from generated JavaScript as text. It never evaluates downloaded JavaScript.
 - `Data/ObservationMatcher.cs` joins observations only on timestamp, runtime
@@ -342,9 +495,15 @@ running the app does not.
   IQR bands locally from primary-series values.
 - `Data/CachedPageClient.cs` and `DiskPageCache.cs` provide bounded-refresh
   local caching with stale-cache fallback during network failures.
-- `Data/BuildSnapshotImporter.cs` allowlists BDN statistics and identity into
-  compressed same-build snapshots; `BuildComparison.cs` accounts for coverage
-  and calculates strict common-set speedups.
+- `Data/DirectRunAcquirer.cs` discovers the four AzDO/Helix lanes, validates
+  authenticated result artifacts, and keeps its raw cache outside the repo.
+- `Data/DirectHistoryArchive.cs` projects retained compact history from full
+  sanitized snapshots, enforces completeness/retention, and exposes the bundled
+  provider abstraction used by the explorer and cross-build trend.
+- `Data/BuildSnapshotImporter.cs` allowlists BDN or combined perf-lab
+  statistics and exact identity into compressed same-build snapshots;
+  `BuildComparison.cs` accounts for coverage and calculates strict common-set
+  speedups.
 - `Components/Pages/CompareBuilds.razor` presents the four-runtime snapshot
   comparison independently of the historical data source.
 
@@ -389,13 +548,17 @@ variables are expanded for configured paths.
 
 ## Tests
 
-Small checked-in HTML fixtures and focused unit tests cover encoded benchmark
+Small checked-in fixtures and focused unit tests cover encoded benchmark
 names, primary-trace selection, optional errors, strict SHA matching, range
 selection, reverse/zero/duplicate pin cases, median/IQR windows, compare-link
 validation, query-state round trips and rejection, autofiling input validation,
 hidden metadata, grouped Markdown tables, entity decoding, tricky parameters,
 safe-link rejection, repro extraction, external-triage sanitization, heuristic
-thresholds, exact history mapping, and missing/ambiguous SHA behavior.
+thresholds, exact history mapping, missing/ambiguous SHA behavior, AzDO job
+discovery, lane mapping, partial partitions, combined perf-lab import,
+deterministic export, sensitive-data rejection, snapshot selection, direct
+catalog availability, source deduplication/conflicts, direct-only R2R history,
+four-way direct matching, and insufficient variability samples.
 
 ```bash
 dotnet test tests/WasmBenchmarkHistory.Tests --filter 'Category!=Live'
@@ -404,8 +567,8 @@ RUN_LIVE_CHANGE_SET_SMOKE=1 dotnet test tests/WasmBenchmarkHistory.Tests --filte
 dotnet build WasmBenchmarkHistory.slnx
 ```
 
-The live smoke test is read-only. It loads all three published indexes and one
-shared benchmark history from each run configuration. GitHub Actions runs the
+The public live smoke test is read-only. It loads all three published indexes
+and one shared benchmark history from each published run configuration. GitHub Actions runs the
 ordinary restore, Release build, tests, and publish validation for pull requests
 and pushes to `main`. A separate daily/manual workflow runs the network-dependent
 live smoke so upstream availability does not gate ordinary changes. The

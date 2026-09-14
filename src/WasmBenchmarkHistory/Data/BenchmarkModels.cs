@@ -3,7 +3,7 @@ namespace WasmBenchmarkHistory.Data;
 public sealed record RunConfiguration(
     string Id,
     string DisplayName,
-    Uri IndexUri,
+    Uri? IndexUri,
     string Color,
     string Description);
 
@@ -30,8 +30,17 @@ public static class KnownRunConfigurations
             "CoreCLR Wasm",
             new Uri(BaseUrl + "/reports/allTestHistory/refs/heads/main_x64_ubuntu%2022.04_CompilationMode=wasm_RunKind=micro_RuntimeType=coreclr/ViperUbuntu/AllTestindex.html"),
             "#20b486",
-            "CoreCLR Wasm microbenchmarks")
+            "CoreCLR Wasm microbenchmarks"),
+        new(
+            "coreclr-wasm-r2r",
+            "CoreCLR Wasm R2R (direct snapshots)",
+            null,
+            "#d56bff",
+            "Temporary direct Helix snapshots; no continuous public history yet")
     ];
+
+    public static IReadOnlyList<RunConfiguration> Published { get; } =
+        All.Where(run => run.IndexUri is not null).ToArray();
 
     public static RunConfiguration Get(string id) =>
         All.FirstOrDefault(run => run.Id == id)
@@ -42,19 +51,27 @@ public sealed record BenchmarkLink(string Benchmark, Uri PageUri);
 
 public sealed class BenchmarkCatalogEntry(
     string benchmark,
-    IReadOnlyDictionary<string, Uri> pages)
+    IReadOnlyDictionary<string, Uri> pages,
+    IReadOnlySet<string>? directRuns = null)
 {
     public string Benchmark { get; } = benchmark;
 
     public IReadOnlyDictionary<string, Uri> Pages { get; } = pages;
 
-    public bool IsShared => Pages.Count == KnownRunConfigurations.All.Count;
+    public IReadOnlySet<string> DirectRuns { get; } =
+        directRuns ?? new HashSet<string>(StringComparer.Ordinal);
+
+    public bool IsAvailable(string runId) => Pages.ContainsKey(runId) || DirectRuns.Contains(runId);
+
+    public int AvailableRunCount => KnownRunConfigurations.All.Count(run => IsAvailable(run.Id));
+
+    public bool IsShared => AvailableRunCount == KnownRunConfigurations.All.Count;
 
     public string Availability =>
         IsShared
             ? "Shared by all runs"
             : $"Missing: {string.Join(", ", KnownRunConfigurations.All
-                .Where(run => !Pages.ContainsKey(run.Id))
+                .Where(run => !IsAvailable(run.Id))
                 .Select(run => run.DisplayName))}";
 }
 
@@ -163,13 +180,25 @@ public sealed record BenchmarkObservation(
     double? Error,
     string RuntimeSha,
     string PerformanceSha,
-    string? TraceName);
+    string? TraceName,
+    ObservationSource Source = ObservationSource.PublishedHistory,
+    string? BuildId = null,
+    IReadOnlyList<double>? Samples = null,
+    string? Partition = null,
+    string? SourceLabel = null);
+
+public enum ObservationSource
+{
+    PublishedHistory,
+    DirectSnapshot
+}
 
 public sealed record BenchmarkHistory(
     string Benchmark,
     RunConfiguration Run,
     string? TraceName,
-    IReadOnlyList<BenchmarkObservation> Observations);
+    IReadOnlyList<BenchmarkObservation> Observations,
+    IReadOnlyList<string>? DataConflicts = null);
 
 public readonly record struct ObservationKey(
     DateTime Timestamp,

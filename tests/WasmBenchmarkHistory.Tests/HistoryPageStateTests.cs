@@ -38,6 +38,25 @@ public sealed class HistoryPageStateTests
     }
 
     [Fact]
+    public void StateRoundTripsFourRunsIncludingDirectR2R()
+    {
+        var state = new HistoryPageState(
+            "N.T.Run",
+            ["mono-wasm", "mono-wasm-aot", "coreclr-wasm", "coreclr-wasm-r2r"],
+            false,
+            HistoryTimeRange.All,
+            null,
+            null,
+            null,
+            false);
+
+        var result = HistoryPageStateCodec.Parse(HistoryPageStateCodec.ToRelativeUri(state));
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal(state.RunIds, result.State.RunIds);
+    }
+
+    [Fact]
     public void InvalidSharedValuesAreIgnoredWithWarnings()
     {
         var result = HistoryPageStateCodec.Parse(

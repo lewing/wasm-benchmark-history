@@ -48,6 +48,14 @@
         </span>
     </div>
 
+    @if (DirectCount > 0)
+    {
+        <div class="direct-note">
+            Diamond markers are temporary direct Helix snapshots. They merge only on exact build identity;
+            equivalent published points take precedence and conflicts are reported as errors.
+        </div>
+    }
+
     @if (Series.Count == 0)
     {
         <div class="chart-empty">
@@ -63,7 +71,7 @@
                 <span>
                     <i style="background:@series.History.Run.Color"></i>
                     <strong>@series.History.Run.DisplayName</strong>
-                    <small>@series.Points.Count.ToString("N0") visible points</small>
+                    <small>@series.Points.Count.ToString("N0") visible points@(DirectSuffix(series.History))</small>
                 </span>
             }
         </div>
@@ -100,20 +108,38 @@
 
                     @foreach (var series in Series)
                     {
-                        @foreach (var segment in PointSegments(series.Points))
+                        @if (series.History.Observations.Any(
+                            observation => observation.Source == ObservationSource.PublishedHistory) ||
+                            series.History.Observations.Count >= 3)
                         {
-                            <polyline class="series-line"
-                                      points="@Polyline(segment)"
-                                      stroke="@series.History.Run.Color" />
+                            @foreach (var segment in PointSegments(series.Points))
+                            {
+                                <polyline class="series-line"
+                                          points="@Polyline(segment)"
+                                          stroke="@series.History.Run.Color" />
+                            }
                         }
 
                         @foreach (var point in SamplePoints(series.Points))
                         {
-                            <circle class="series-point"
-                                    cx="@ScaleX(point.Timestamp.Ticks)"
-                                    cy="@ScaleY(point.Value)"
-                                    r="3.2"
-                                    fill="@series.History.Run.Color" />
+                            @if (point.Source == ObservationSource.DirectSnapshot)
+                            {
+                                <rect class="series-point direct-point"
+                                      x="@(ScaleX(point.Timestamp.Ticks) - 4)"
+                                      y="@(ScaleY(point.Value) - 4)"
+                                      width="8"
+                                      height="8"
+                                      transform="rotate(45 @ScaleX(point.Timestamp.Ticks) @ScaleY(point.Value))"
+                                      fill="@series.History.Run.Color" />
+                            }
+                            else
+                            {
+                                <circle class="series-point"
+                                        cx="@ScaleX(point.Timestamp.Ticks)"
+                                        cy="@ScaleY(point.Value)"
+                                        r="3.2"
+                                        fill="@series.History.Run.Color" />
+                            }
                         }
                     }
 
@@ -264,6 +290,20 @@
                                         <dt>trace/build</dt>
                                         <dd title="@point.Observation.TraceName">@(point.Observation.TraceName ?? "not reported")</dd>
                                     </div>
+                                    <div>
+                                        <dt>source</dt>
+                                        <dd>@(point.Observation.Source == ObservationSource.DirectSnapshot
+                                            ? $"{point.Observation.SourceLabel ?? "Direct snapshot"} · build {point.Observation.BuildId}" +
+                                                (point.Observation.Partition is null ? "" : $" · {point.Observation.Partition}")
+                                            : "Published allTestHistory")</dd>
+                                    </div>
+                                    @if (point.Observation.Samples is { Count: > 0 } samples)
+                                    {
+                                        <div>
+                                            <dt>samples</dt>
+                                            <dd>@samples.Count raw values retained</dd>
+                                        </div>
+                                    }
                                 </dl>
                                 @if (_selectionState.IsPinned)
                                 {
@@ -392,6 +432,8 @@
     private string? _selectionScope;
 
     private IReadOnlyList<ChartSeries> Series => _series;
+    private int DirectCount => Histories.Sum(history =>
+        history.Observations.Count(observation => observation.Source == ObservationSource.DirectSnapshot));
 
     private IEnumerable<PinMarker> VisiblePinMarkers
     {
@@ -604,7 +646,8 @@
                     history.Observations
                         .Select(observation => new ChartPoint(
                             observation.Timestamp,
-                            observation.Value))
+                            observation.Value,
+                            observation.Source))
                         .ToArray()))
                 .Where(series => series.Points.Count > 0)
                 .ToArray();
@@ -627,7 +670,8 @@
                         var baseline = match.Observations[baselineId];
                         return new ChartPoint(
                             observation.Timestamp,
-                            observation.Value / baseline.Value);
+                            observation.Value / baseline.Value,
+                            observation.Source);
                     }).ToArray()))
             .Where(series => series.Points.Count > 0)
             .ToArray();
@@ -880,6 +924,13 @@
             ? value.ToString("0.##", CultureInfo.InvariantCulture) + "%"
             : "—";
 
+    private static string DirectSuffix(BenchmarkHistory history)
+    {
+        var count = history.Observations.Count(
+            observation => observation.Source == ObservationSource.DirectSnapshot);
+        return count == 0 ? "" : $" · {count:N0} direct";
+    }
+
     public async ValueTask DisposeAsync()
     {
         try
@@ -904,7 +955,7 @@
 
     private sealed record RangeOption(string Label, HistoryTimeRange Range);
 
-    private sealed record ChartPoint(DateTime Timestamp, double Value);
+    private sealed record ChartPoint(DateTime Timestamp, double Value, ObservationSource Source);
 
     private sealed record HitRegion(int TimelineIndex, double X, double Width);
 

@@ -200,6 +200,20 @@ svg {
     vector-effect: non-scaling-stroke;
 }
 
+.direct-note {
+    margin: .75rem 0;
+    padding: .65rem .8rem;
+    border: 1px solid color-mix(in srgb, #d56bff 45%, var(--line));
+    border-radius: .5rem;
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+.direct-point {
+    stroke: #fff;
+    stroke-width: 1.5;
+}
+
 .interaction-band {
     cursor: crosshair;
     fill: transparent;

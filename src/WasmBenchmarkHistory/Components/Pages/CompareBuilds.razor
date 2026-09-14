@@ -1,5 +1,6 @@
 @page "/compare-builds"
 @inject BuildSnapshotStore Store
+@inject BundledDirectHistoryProvider DirectHistory
 
 <PageTitle>Four-runtime Wasm comparison</PageTitle>
 
@@ -7,15 +8,15 @@
     <p class="eyebrow">SAME-BUILD MEASUREMENTS</p>
     <h1>Four Wasm runtime modes</h1>
     <p>Compare Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R.
-        These imported snapshots are separate from <a href="/">historical trends</a>;
-        no earlier ColdStart runs are mixed in.</p>
+        Snapshot-to-snapshot calculations stay within one build. The same exact observations
+        can also augment <a href="/">historical trends</a>; earlier ColdStart runs are never mixed in.</p>
 </section>
 
 <label for="build-select">Build</label>
 <select id="build-select" value="@_buildId" @onchange="ChangeBuildAsync">
     @foreach (var id in _buildIds)
     {
-        <option value="@id">@id</option>
+        <option value="@id">@BuildLabel(id)</option>
     }
 </select>
 
@@ -30,6 +31,9 @@ else if (_result is null)
 else
 {
     var snapshot = _result.Snapshot;
+    <p class="capture"><strong>@snapshot.CaptureSource</strong> · Build @snapshot.Build.BuildId
+        (@snapshot.Build.BuildNumber) · captured
+        @(snapshot.CapturedAt?.ToString("u", CultureInfo.InvariantCulture) ?? "before capture timestamps were recorded")</p>
     <section class="notice">
         <strong>Descriptive comparison, not a significance claim.</strong>
         <p>One build, different machines and measurement counts. Means are nanoseconds per operation;
@@ -94,6 +98,72 @@ else
     </section>
 
     <section>
+        <h2>Direct snapshot trend</h2>
+        @if (_historyArchive is null)
+        {
+            <p>No compact direct-history archive is installed.</p>
+        }
+        else if (_trendBenchmark is null)
+        {
+            <p>Select <strong>Trend</strong> beside a benchmark below to compare it across retained builds.</p>
+        }
+        else
+        {
+            <p><strong>@_trendBenchmark</strong></p>
+            <p>@_historyArchive.Builds.Length retained complete builds, ordered by measurement timestamp.
+                Values are means in nanoseconds. “vs prior” compares each lane with its previous retained build;
+                “vs Mono” compares lanes within the same build. Above 1 means the current lane is faster.
+                Compact archive generated
+                @_historyArchive.GeneratedAt.ToString("u", CultureInfo.InvariantCulture).</p>
+            @if (_historyArchive.Exclusions.Length > 0)
+            {
+                <p class="excluded-builds">
+                    Excluded/pruned:
+                    @string.Join("; ", _historyArchive.Exclusions.Select(
+                        value => $"{value.BuildId} ({value.Reason})"))
+                </p>
+            }
+            <div class="table-wrap">
+                <table class="trend-table">
+                    <thead>
+                        <tr><th>Build</th>
+                            @foreach (var id in BuildComparison.LaneIds)
+                            {
+                                <th>@LaneName(id)</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in TrendRows)
+                        {
+                            <tr>
+                                <th>@row.Build.BuildNumber<small>@TrendDate(row.Build)</small></th>
+                                @foreach (var id in BuildComparison.LaneIds)
+                                {
+                                    var cell = row.Cells[id];
+                                    <td>
+                                        @if (cell.Status == "valid")
+                                        {
+                                            <strong>@Number(cell.Mean) ns</strong>
+                                            <small>SE @Number(cell.Error); variance @Number(cell.Variance); N @cell.N</small>
+                                            <small class="ratio">vs prior @FormatRatio(cell.SpeedupVsPrevious);
+                                                vs Mono @FormatRatio(cell.SpeedupVsMono)</small>
+                                        }
+                                        else
+                                        {
+                                            <strong class="excluded">@cell.Status</strong>
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section>
         <h2>Individual benchmarks</h2>
         <div class="controls">
             <label>Search <input type="search" @bind="_search" @bind:event="oninput" @bind:after="ResetPage" placeholder="Namespace, method, parameters" /></label>
@@ -122,7 +192,11 @@ else
                     @foreach (var row in FilteredRows.Skip(_page * PageSize).Take(PageSize))
                     {
                         <tr>
-                            <th><details><summary>@row.Identity.DisplayName</summary>
+                            <th>
+                                <button type="button"
+                                        class="trend-button @(_trendBenchmark == row.Identity.DisplayName ? "selected" : null)"
+                                        @onclick="() => _trendBenchmark = row.Identity.DisplayName">Trend</button>
+                                <details><summary>@row.Identity.DisplayName</summary>
                                 <p>@string.Join(", ", RowCategories(row))</p>
                                 @foreach (var id in BuildComparison.LaneIds)
                                 {
@@ -137,7 +211,8 @@ else
                                         <p>Measurement settings: @(measurement.MeasurementConfiguration ?? "unavailable")</p>
                                     }
                                 }
-                            </details></th>
+                                </details>
+                            </th>
                             @foreach (var id in BuildComparison.LaneIds)
                             {
                                 var cell = row.Cells[id];
@@ -180,7 +255,8 @@ else
         {
             <details class="provenance">
                 <summary>@lane.Provenance.DisplayName</summary>
-                <p>Helix job <code>@lane.Provenance.HelixJobId</code></p>
+                <p>Helix job <code>@lane.Provenance.HelixJobId</code>;
+                    @lane.Partitions.Length / @lane.Provenance.ExpectedPartitions partitions captured.</p>
                 <p>Target runtime package: @lane.Provenance.RuntimeVersion<br />V8: @lane.Provenance.V8Version<br />
                     Workload: @lane.Provenance.WorkloadVersion<br />Configuration: @lane.Provenance.Configuration</p>
                 <p>Host SDK (not target runtime): @(lane.Provenance.HostSdkVersion ?? "unavailable")<br />
@@ -205,6 +281,10 @@ else
 @code {
     private const int PageSize = 50;
     private string[] _buildIds = [];
+    private IReadOnlyDictionary<string, BuildSnapshotDescriptor> _buildDescriptors =
+        new Dictionary<string, BuildSnapshotDescriptor>(StringComparer.Ordinal);
+    private DirectHistoryArchive? _historyArchive;
+    private string? _trendBenchmark;
     private string _buildId = "";
     private BuildComparisonResult? _result;
     private string? _error;
@@ -232,7 +312,13 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _buildIds = Store.GetBuildIds();
+        var descriptorTask = Store.GetDescriptorsAsync();
+        var archiveTask = DirectHistory.LoadArchiveAsync();
+        await Task.WhenAll(descriptorTask, archiveTask);
+        var descriptors = await descriptorTask;
+        _historyArchive = await archiveTask;
+        _buildIds = descriptors.Select(value => value.BuildId).ToArray();
+        _buildDescriptors = descriptors.ToDictionary(value => value.BuildId, StringComparer.Ordinal);
         if (_buildIds.Length > 0)
         {
             _buildId = _buildIds[0];
@@ -257,7 +343,10 @@ else
         {
             var snapshot = await Store.LoadAsync(_buildId);
             if (version == _loadVersion)
+            {
                 _result = BuildComparison.Analyze(snapshot);
+                _trendBenchmark ??= _result.Common.FirstOrDefault()?.Identity.DisplayName;
+            }
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or System.Text.Json.JsonException)
         {
@@ -274,4 +363,18 @@ else
     private static string FormatRatio(double? value) =>
         value is { } number && double.IsFinite(number)
             ? number.ToString("0.000'x'", CultureInfo.InvariantCulture) : "unavailable";
+
+    private string BuildLabel(string id) => _buildDescriptors.TryGetValue(id, out var descriptor)
+        ? $"{descriptor.BuildId} · {descriptor.BuildNumber} · {descriptor.CaptureSource}"
+        : id;
+
+    private DirectHistoryTrendRow[] TrendRows => _historyArchive is null || _trendBenchmark is null
+        ? []
+        : DirectHistoryTrend.Create(_historyArchive, _trendBenchmark);
+
+    private static string TrendDate(BuildProvenance build) =>
+        DateTimeOffset.TryParse(build.SourceDate, CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind, out var value)
+            ? value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)
+            : build.SourceDate;
 }

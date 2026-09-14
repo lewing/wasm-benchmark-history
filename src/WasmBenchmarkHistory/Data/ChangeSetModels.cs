@@ -243,6 +243,11 @@ public sealed record ImportedHistoryTarget(
 
         foreach (var run in KnownRunConfigurations.All)
         {
+            if (run.IndexUri is null)
+            {
+                continue;
+            }
+
             var directory = SafeChangeSetLinks.DecodedDirectory(run.IndexUri);
             var path = Uri.UnescapeDataString(historyUri.AbsolutePath);
             if (!path.StartsWith(directory, StringComparison.Ordinal)

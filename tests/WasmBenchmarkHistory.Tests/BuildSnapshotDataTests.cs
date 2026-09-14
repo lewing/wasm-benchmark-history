@@ -52,4 +52,54 @@ public sealed class BuildSnapshotDataTests
             Assert.Equal(expectedRatios[index], pairs[index].GeometricMean!.Value, 10);
         }
     }
+
+    [Fact]
+    public async Task Build3074629_ContainsCompleteDirectRunInventory()
+    {
+        var snapshot = await BuildSnapshotImporter.ReadAsync(
+            Path.Combine(AppContext.BaseDirectory, "DataSets", "3074629.json.gz"));
+        var result = BuildComparison.Analyze(snapshot);
+
+        Assert.Equal("3074629", snapshot.Build.BuildId);
+        Assert.Equal("Direct Helix snapshot", snapshot.CaptureSource);
+        Assert.NotNull(snapshot.CapturedAt);
+        Assert.Equal(60, snapshot.Lanes.Sum(lane => lane.Partitions.Length));
+        Assert.All(snapshot.Lanes, lane => Assert.All(lane.Partitions,
+            partition => Assert.Equal("passed", partition.Status)));
+        Assert.Equal(5_244, result.Common.Length);
+        Assert.Equal([5_682, 5_288, 5_622, 5_640], result.Coverage.Select(value => value.Valid));
+        Assert.Equal([1, 2, 22, 4], result.Coverage.Select(value => value.Invalid));
+        Assert.All(result.Coverage, value => Assert.Equal(0, value.Duplicates));
+        Assert.All(result.Coverage, value => Assert.Equal(0, value.Unidentified));
+    }
+
+    [Fact]
+    public async Task DirectHistory_RetainsSevenCompleteBuildsAndRecordsExclusions()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "DataSets", "direct-history.json.gz");
+        var archive = await DirectHistoryArchiveBuilder.ReadAsync(path);
+
+        Assert.True(new FileInfo(path).Length < 8_000_000);
+        Assert.Equal(
+            ["3068640", "3069775", "3070008", "3070235", "3074299", "3074425", "3074629"],
+            archive.Builds.Select(build => build.Build.BuildId));
+        Assert.Equal(["3071174", "3071763", "3072440"],
+            archive.Exclusions.Select(value => value.BuildId));
+        Assert.All(archive.Builds, build => Assert.All(build.Lanes, lane =>
+        {
+            Assert.Equal(lane.ExpectedPartitions, lane.Partitions.Length);
+            Assert.All(lane.Partitions, partition => Assert.True(partition.Measurements > 0));
+        }));
+        Assert.All(archive.Builds.SelectMany(build => build.Lanes)
+            .SelectMany(lane => lane.Measurements),
+            measurement => Assert.True(measurement.N is null or > 0));
+
+        var trend = DirectHistoryTrend.Create(
+            archive, "System.Tests.Perf_Random.Next_int_unseeded");
+        Assert.Equal(7, trend.Length);
+        Assert.True(trend[0].Cells["coreclr-r2r"].Mean > 2_500);
+        Assert.InRange(trend[^1].Cells["coreclr-r2r"].Mean!.Value, 30, 35);
+        Assert.True(trend.Single(row => row.Build.BuildId == "3074299")
+            .Cells["coreclr-r2r"].SpeedupVsPrevious > 40);
+    }
 }

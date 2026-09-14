@@ -417,6 +417,15 @@
     color: var(--muted);
 }
 
+.state-banner.direct-source {
+    background: rgb(213 107 255 / 7%);
+    border-color: rgb(213 107 255 / 30%);
+}
+
+.state-banner.direct-source strong {
+    color: #e2a1ff;
+}
+
 .error-banner strong {
     color: #ff929a;
 }
