@@ -38,6 +38,25 @@ unit. Hover and detail views retain the exact canonical nanosecond value in
 visible secondary text and accessible titles. Source-provided strings imported
 from autofiling issues remain unchanged as evidence.
 
+## Copilot ADX benchmark canvas
+
+The project-scoped `adx-benchmark-viz` canvas is an agent-driven workbench for
+fast, conversational visualization of normalized `PerformanceData` ADX results.
+The foreground Copilot agent runs authenticated read-only Kusto queries, writes
+the exact bounded data to a session-workspace JSON artifact, and opens the
+canvas for time series, paired scatter, ratio distribution, or ranked-table
+analysis. The extension does not request ADX credentials, execute KQL, or put
+secrets/tokens in iframe state; the Blazor app remains the shareable product UI.
+
+The versioned data contract, stable deduplication key, action reference,
+validation limits, and example KQL/data mappings are documented in
+[`.github/extensions/adx-benchmark-canvas/README.md`](.github/extensions/adx-benchmark-canvas/README.md).
+Run its dependency-free tests with:
+
+```bash
+node --test .github/extensions/adx-benchmark-canvas/extension.test.mjs
+```
+
 ### Investigate a temporal regression
 
 Use **30d**, **90d**, **1y**, or **All** to focus the chart, or drag across the

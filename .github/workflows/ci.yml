@@ -24,6 +24,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test Copilot canvas extension
+        run: node --test .github/extensions/adx-benchmark-canvas/extension.test.mjs
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
