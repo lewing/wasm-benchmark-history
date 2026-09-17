@@ -48,14 +48,17 @@ public sealed class LiveDataSmokeTests
             .Select(run => run.Id)
             .ToArray();
 
-        Assert.Equal(3, selectedRuns.Length);
+        Assert.Equal(4, selectedRuns.Length);
         var histories = await service.LoadHistoriesAsync(
             catalog,
             benchmark.Benchmark,
             selectedRuns);
 
-        Assert.Equal(3, histories.Count);
+        Assert.Equal(4, histories.Count);
         Assert.All(histories, history => Assert.NotEmpty(history.Observations));
+        var r2r = Assert.Single(histories, history => history.Run.Id == "coreclr-wasm-r2r");
+        Assert.All(r2r.Observations, observation =>
+            Assert.Equal(ObservationSource.PublishedHistory, observation.Source));
         _ = ObservationMatcher.MatchStrict(histories);
     }
 }

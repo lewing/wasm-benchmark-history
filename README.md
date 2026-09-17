@@ -98,16 +98,13 @@ investigation run, summary method, and exact A/B identities are encoded in the
 query string. Reloading or sharing the URL restores valid state; malformed,
 unavailable, or ambiguous fields are ignored with an on-page explanation.
 
-Installed direct Helix snapshots augment the catalog and history chart. The
-three published runs merge direct points by the existing strict key
+All four Wasm runtime modes, including CoreCLR R2R, load continuous history
+from their public `allTestHistory` indexes. Installed direct Helix snapshots
+still augment the catalog and history chart by the existing strict key
 (`timestamp + runtime SHA + performance SHA`); an equivalent published point
 wins, while a value or duplicate-cardinality conflict is surfaced instead of
-silently selecting one. **CoreCLR Wasm R2R (direct snapshots)** is available
-only for benchmark identities with valid direct measurements. Direct points
-use diamond markers, retain raw samples and errors, and show their snapshot/build
-source in the hover card. A single R2R point is not presented as a continuous
-trend; fewer than three direct points are marker-only, and rolling variability
-still requires the configured minimum observation window.
+silently selecting one. Unmatched direct points use diamond markers, retain
+raw samples and errors, and show their snapshot/build source in the hover card.
 
 The bundled `DataSets/direct-history.json.gz` file is a temporary compact
 latest-build cache, not the canonical direct-run model. It is deterministically
@@ -499,7 +496,7 @@ running the app does not.
   local and sends one completed range to the server.
 - `Components/RegressionInvestigationPanel.razor` keeps within-run temporal
   analysis visually and semantically separate from strict runtime comparison.
-- `Data/BenchmarkIndexParser.cs` catalogs links from the three published index
+- `Data/BenchmarkIndexParser.cs` catalogs links from the four published index
   pages. `DirectSnapshotHistory.cs` adds valid snapshot identities and merges
   exact direct observations only after a benchmark is selected.
 - `Data/BenchmarkHistoryParser.cs` extracts the `defaultCounter` primary trace
@@ -583,7 +580,7 @@ safe-link rejection, repro extraction, external-triage sanitization, heuristic
 thresholds, exact history mapping, missing/ambiguous SHA behavior, AzDO job
 discovery, lane mapping, partial partitions, combined perf-lab import,
 deterministic export, sensitive-data rejection, snapshot selection, direct
-catalog availability, source deduplication/conflicts, direct-only R2R history,
+catalog availability, source deduplication/conflicts, direct R2R augmentation,
 four-way direct matching, and insufficient variability samples.
 
 ```bash
@@ -593,7 +590,7 @@ RUN_LIVE_CHANGE_SET_SMOKE=1 dotnet test tests/WasmBenchmarkHistory.Tests --filte
 dotnet build WasmBenchmarkHistory.slnx
 ```
 
-The public live smoke test is read-only. It loads all three published indexes
+The public live smoke test is read-only. It loads all four published indexes
 and one shared benchmark history from each published run configuration. GitHub Actions runs the
 ordinary restore, Release build, tests, and publish validation for pull requests
 and pushes to `main`. A separate daily/manual workflow runs the network-dependent
