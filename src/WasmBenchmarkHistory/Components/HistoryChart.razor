@@ -50,9 +50,10 @@
 
     @if (DirectCount > 0)
     {
-        <div class="direct-note">
-            Diamond markers are temporary direct Helix snapshots. They merge only on exact build identity;
-            equivalent published points take precedence and conflicts are reported as errors.
+        <div id="direct-snapshot-note" class="direct-note">
+            Diamond markers are bundled fallback observations used only where published history has no exact
+            timestamp/runtime/performance match. Dashed connectors are visual guides between consecutive fallback
+            observations and break across long gaps; they do not imply continuous published history.
         </div>
     }
 
@@ -65,15 +66,34 @@
     }
     else
     {
-        <div class="legend">
+        <div class="legend" aria-label="Chart series">
             @foreach (var series in Series)
             {
-                <span>
-                    <i style="background:@series.History.Run.Color"></i>
-                    <strong>@series.History.Run.DisplayName</strong>
-                    <small>@series.Points.Count.ToString("N0") visible points@(DirectSuffix(series.History))</small>
-                </span>
+                <button type="button"
+                        class="legend-item @SeriesFocusClass(series.History.Run.Id)"
+                        style="--series-color:@series.History.Run.Color"
+                        aria-pressed="@(_seriesFocus.IsFocused(series.History.Run.Id).ToString().ToLowerInvariant())"
+                        aria-label="@LegendFocusLabel(series)"
+                        @onclick="() => ToggleSeriesFocus(series.History.Run.Id)">
+                    <span class="legend-symbol @(series.IsDirectOnly ? "direct" : "published")"
+                          aria-hidden="true">
+                        <i></i>
+                    </span>
+                    <span class="legend-copy">
+                        <strong>@series.History.Run.DisplayName</strong>
+                        <small>@series.Points.Count.ToString("N0") visible points@(DirectSuffix(series.History))</small>
+                    </span>
+                </button>
             }
+            @if (_seriesFocus.FocusedRunId is not null)
+            {
+                <button type="button"
+                        class="legend-reset"
+                        @onclick="ShowAllSeries">
+                    Show all
+                </button>
+            }
+            <span class="visually-hidden" role="status" aria-live="polite">@SeriesFocusStatus</span>
         </div>
 
         <div class="plot-area" @onkeydown="OnPlotKeyDown">
@@ -84,7 +104,9 @@
                      preserveAspectRatio="none"
                      role="img"
                      aria-label="Historical benchmark line chart"
-                     aria-describedby="chart-hover-instructions"
+                     aria-describedby="@(DirectCount > 0
+                         ? "chart-hover-instructions direct-snapshot-note"
+                         : "chart-hover-instructions")"
                      @onpointerleave="OnChartPointerLeave">
                     <rect class="plot-background" x="@PlotLeft" y="@PlotTop" width="@PlotWidth" height="@PlotHeight" rx="8" />
 
@@ -108,39 +130,58 @@
 
                     @foreach (var series in Series)
                     {
-                        @if (series.History.Observations.Any(
-                            observation => observation.Source == ObservationSource.PublishedHistory) ||
-                            series.History.Observations.Count >= 3)
-                        {
-                            @foreach (var segment in PointSegments(series.Points))
+                        <g class="series-group @SeriesFocusClass(series.History.Run.Id)">
+                            @foreach (var segment in PublishedPointSegments(series.Points))
                             {
                                 <polyline class="series-line"
                                           points="@Polyline(segment)"
                                           stroke="@series.History.Run.Color" />
                             }
-                        }
 
-                        @foreach (var point in SamplePoints(series.Points))
-                        {
-                            @if (point.Source == ObservationSource.DirectSnapshot)
+                            @foreach (var path in DirectConnectorPaths(series.Points))
                             {
-                                <rect class="series-point direct-point"
-                                      x="@(ScaleX(point.Timestamp.Ticks) - 4)"
-                                      y="@(ScaleY(point.Value) - 4)"
-                                      width="8"
-                                      height="8"
-                                      transform="rotate(45 @ScaleX(point.Timestamp.Ticks) @ScaleY(point.Value))"
-                                      fill="@series.History.Run.Color" />
+                                <polyline class="series-line direct-series-line"
+                                          points="@path"
+                                          stroke="@series.History.Run.Color" />
                             }
-                            else
+
+                            @foreach (var point in DisplayPoints(series.Points))
                             {
-                                <circle class="series-point"
-                                        cx="@ScaleX(point.Timestamp.Ticks)"
-                                        cy="@ScaleY(point.Value)"
-                                        r="3.2"
-                                        fill="@series.History.Run.Color" />
+                                @if (point.Source == ObservationSource.DirectSnapshot)
+                                {
+                                    var marker = DirectMarker(series, point);
+                                    var x = ScaleX(point.Timestamp.Ticks);
+                                    var y = ScaleY(point.Value);
+                                    <g class="@marker.CssClass"
+                                       role="@marker.Role"
+                                       aria-label="@marker.AccessibleLabel"
+                                       data-source="direct-snapshot"
+                                       data-marker-shape="@marker.Shape">
+                                        <rect class="direct-point-halo"
+                                              x="@(x - DirectSeriesPresentation.MarkerHaloSize / 2)"
+                                              y="@(y - DirectSeriesPresentation.MarkerHaloSize / 2)"
+                                              width="@DirectSeriesPresentation.MarkerHaloSize"
+                                              height="@DirectSeriesPresentation.MarkerHaloSize"
+                                              transform="rotate(45 @x @y)" />
+                                        <rect class="series-point direct-point"
+                                              x="@(x - DirectSeriesPresentation.MarkerSize / 2)"
+                                              y="@(y - DirectSeriesPresentation.MarkerSize / 2)"
+                                              width="@DirectSeriesPresentation.MarkerSize"
+                                              height="@DirectSeriesPresentation.MarkerSize"
+                                              transform="rotate(45 @x @y)"
+                                              fill="@series.History.Run.Color" />
+                                    </g>
+                                }
+                                else
+                                {
+                                    <circle class="series-point"
+                                            cx="@ScaleX(point.Timestamp.Ticks)"
+                                            cy="@ScaleY(point.Value)"
+                                            r="3.2"
+                                            fill="@series.History.Run.Color" />
+                                }
                             }
-                        }
+                        </g>
                     }
 
                     @foreach (var marker in VisiblePinMarkers)
@@ -172,12 +213,12 @@
                               y2="@(PlotTop + PlotHeight)" />
                         @foreach (var point in _hover.Points)
                         {
-                            <circle class="hover-point-halo @(_selectionState.IsPinned ? "pinned" : null)"
+                            <circle class="hover-point-halo @(_selectionState.IsPinned ? "pinned" : null) @SeriesFocusClass(point.History.Run.Id)"
                                     cx="@ScaleX(point.Observation.Timestamp.Ticks)"
                                     cy="@ScaleY(point.DisplayValue)"
                                     r="8"
                                     fill="@point.History.Run.Color" />
-                            <circle class="hover-point @(_selectionState.IsPinned ? "pinned" : null)"
+                            <circle class="hover-point @(_selectionState.IsPinned ? "pinned" : null) @SeriesFocusClass(point.History.Run.Id)"
                                     cx="@ScaleX(point.Observation.Timestamp.Ticks)"
                                     cy="@ScaleY(point.DisplayValue)"
                                     r="4.5"
@@ -246,7 +287,7 @@
                         {
                             var identity = ObservationIdentity.From(point.Observation);
                             var unit = DurationFormatter.SelectUnit(point.Observation.Value);
-                            <section>
+                            <section class="@SeriesFocusClass(point.History.Run.Id)">
                                 <div class="hover-run-heading">
                                     <i style="background:@point.History.Run.Color"></i>
                                     <strong>@point.History.Run.DisplayName</strong>
@@ -310,7 +351,7 @@
                                     <div>
                                         <dt>source</dt>
                                         <dd>@(point.Observation.Source == ObservationSource.DirectSnapshot
-                                            ? $"{point.Observation.SourceLabel ?? "Direct snapshot"} · build {point.Observation.BuildId}" +
+                                            ? $"{point.Observation.SourceLabel ?? "Direct snapshot"} fallback · build {point.Observation.BuildId}" +
                                                 (point.Observation.Partition is null ? "" : $" · {point.Observation.Partition}")
                                             : "Published allTestHistory")</dd>
                                     </div>
@@ -367,7 +408,8 @@
                                        Normalized="Normalized"
                                        TimeRange="TimeRange"
                                        Window="VariabilityWindow"
-                                       PinnedTimestamp="_selectionState.PinnedTimestamp" />
+                                       PinnedTimestamp="_selectionState.PinnedTimestamp"
+                                       FocusedRunId="_seriesFocus.FocusedRunId" />
         }
     }
 </div>
@@ -434,6 +476,7 @@
     private IReadOnlyList<HitRegion> _hitRegions = [];
     private ChartHoverIndex _hoverIndex = new([], [], false);
     private readonly ChartSelectionState _selectionState = new();
+    private readonly ChartSeriesFocusState _seriesFocus = new();
     private ChartHoverSelection? _hover;
     private long _minTicks;
     private long _maxTicks;
@@ -508,6 +551,7 @@
             _series = [];
             _hoverIndex = new([], [], Normalized);
             _selectionState.Reset();
+            _seriesFocus.ShowAll();
             _hover = null;
             return;
         }
@@ -545,6 +589,7 @@
         _selectionState.Reconcile(_hoverIndex.Timestamps);
         RefreshDisplayedSelection();
         _series = BuildSeries();
+        _seriesFocus.Reconcile(_series.Select(series => series.History.Run.Id));
         if (_series.Count == 0)
         {
             return;
@@ -748,6 +793,28 @@
         IReadOnlyList<ChartPoint> points) =>
         TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
 
+    private IReadOnlyList<IReadOnlyList<ChartPoint>> PublishedPointSegments(
+        IReadOnlyList<ChartPoint> points) =>
+        PointSegments(points
+            .Where(point => point.Source == ObservationSource.PublishedHistory)
+            .ToArray())
+            .Where(segment => segment.Count >= 2)
+            .ToArray();
+
+    private IReadOnlyList<string> DirectConnectorPaths(
+        IReadOnlyList<ChartPoint> points) =>
+        DirectSeriesPresentation.BuildConnectorPaths(
+            points
+                .Where(point => point.Source == ObservationSource.DirectSnapshot)
+                .ToArray(),
+            point => point.Timestamp,
+            point => ChartPointCoordinates(point));
+
+    private string ChartPointCoordinates(ChartPoint point) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Value):0.##}");
+
     private VariabilityBandPoint? FindVariabilityPoint(
         string runId,
         DateTime timestamp) =>
@@ -759,19 +826,58 @@
             ? double.NaN
             : 100 * point.InterquartileRange / Math.Abs(point.Median);
 
-    private static IEnumerable<ChartPoint> SamplePoints(IReadOnlyList<ChartPoint> points)
+    private static IEnumerable<ChartPoint> DisplayPoints(IReadOnlyList<ChartPoint> points)
     {
-        var step = Math.Max(1, (int)Math.Ceiling(points.Count / 100d));
-        for (var index = 0; index < points.Count; index += step)
+        var published = points
+            .Where(point => point.Source == ObservationSource.PublishedHistory)
+            .ToArray();
+        var step = Math.Max(1, (int)Math.Ceiling(published.Length / 100d));
+        var displayed = new List<ChartPoint>();
+        for (var index = 0; index < published.Length; index += step)
         {
-            yield return points[index];
+            displayed.Add(published[index]);
         }
 
-        if (points.Count > 1 && (points.Count - 1) % step != 0)
+        if (published.Length > 1 && (published.Length - 1) % step != 0)
         {
-            yield return points[^1];
+            displayed.Add(published[^1]);
         }
+
+        displayed.AddRange(points.Where(
+            point => point.Source == ObservationSource.DirectSnapshot));
+        return displayed.OrderBy(point => point.Timestamp);
     }
+
+    private DirectMarkerPresentation DirectMarker(
+        ChartSeries series,
+        ChartPoint point) =>
+        DirectSeriesPresentation.CreateMarker(
+            series.History.Run.DisplayName,
+            point.Timestamp,
+            Normalized
+                ? point.Value.ToString("0.000×", CultureInfo.InvariantCulture)
+                : DurationFormatter.FormatExactNanoseconds(point.Value));
+
+    private void ToggleSeriesFocus(string runId) => _seriesFocus.Toggle(runId);
+
+    private void ShowAllSeries() => _seriesFocus.ShowAll();
+
+    private string SeriesFocusClass(string runId) =>
+        _seriesFocus.IsFocused(runId)
+            ? "is-focused"
+            : _seriesFocus.IsDimmed(runId)
+                ? "is-dimmed"
+                : "";
+
+    private string LegendFocusLabel(ChartSeries series) =>
+        _seriesFocus.IsFocused(series.History.Run.Id)
+            ? $"Show all series; {series.History.Run.DisplayName} is focused"
+            : $"Focus {series.History.Run.DisplayName}";
+
+    private string SeriesFocusStatus =>
+        _seriesFocus.FocusedRunId is null
+            ? "All chart series shown"
+            : $"{Series.First(series => series.History.Run.Id == _seriesFocus.FocusedRunId).History.Run.DisplayName} focused; other series dimmed";
 
     private IReadOnlyList<HitRegion> BuildHitRegions()
     {
@@ -939,7 +1045,7 @@
     {
         var count = history.Observations.Count(
             observation => observation.Source == ObservationSource.DirectSnapshot);
-        return count == 0 ? "" : $" · {count:N0} direct";
+        return count == 0 ? "" : $" · {count:N0} fallback";
     }
 
     public async ValueTask DisposeAsync()
@@ -973,7 +1079,15 @@
     private sealed record ChartSeries(
         BenchmarkHistory History,
         IReadOnlyList<ChartPoint> Points,
-        IReadOnlyList<VariabilityBandPoint> Band);
+        IReadOnlyList<VariabilityBandPoint> Band)
+    {
+        public bool HasDirectSnapshots =>
+            Points.Any(point => point.Source == ObservationSource.DirectSnapshot);
+
+        public bool IsDirectOnly =>
+            Points.Count > 0
+            && Points.All(point => point.Source == ObservationSource.DirectSnapshot);
+    }
 
     private sealed record PinMarker(
         InvestigationPinSlot Slot,

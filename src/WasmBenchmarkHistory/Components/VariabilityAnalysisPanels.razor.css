@@ -47,6 +47,19 @@
     padding: .7rem;
 }
 
+.variability-small-multiples article {
+    transition: opacity 120ms ease-out, border-color 120ms ease-out;
+}
+
+.variability-small-multiples article.is-focused {
+    border-color: var(--line-strong);
+}
+
+.variability-small-multiples article.is-dimmed,
+.volatility-line.is-dimmed {
+    opacity: .18;
+}
+
 .variability-small-multiples article > header {
     justify-content: start;
 }
@@ -56,10 +69,17 @@
 }
 
 .series-swatch {
+    background: var(--series-color);
     border-radius: 50%;
     display: inline-block;
     height: .65rem;
     width: .65rem;
+}
+
+.series-swatch.direct {
+    border: 1.5px solid var(--ink);
+    border-radius: .08rem;
+    transform: rotate(45deg);
 }
 
 .variability-small-multiples svg,
@@ -127,6 +147,32 @@
     stroke-width: 1.25;
 }
 
+.mini-series-line.direct-series-line,
+.volatility-line.direct-series-line {
+    opacity: .96;
+    stroke-dasharray: 7 5;
+    stroke-linecap: butt;
+    stroke-width: 2;
+}
+
+.mini-direct-point,
+.mini-direct-point-halo {
+    pointer-events: none;
+    vector-effect: non-scaling-stroke;
+}
+
+.mini-direct-point {
+    stroke: var(--ink);
+    stroke-width: 1.5;
+}
+
+.mini-direct-point-halo {
+    fill: var(--background);
+    opacity: .78;
+    stroke: var(--ink);
+    stroke-opacity: .28;
+    stroke-width: 2.5;
+}
 .volatility-line {
     stroke-width: 1.8;
 }

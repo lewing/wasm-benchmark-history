@@ -98,16 +98,23 @@ investigation run, summary method, and exact A/B identities are encoded in the
 query string. Reloading or sharing the URL restores valid state; malformed,
 unavailable, or ambiguous fields are ignored with an on-page explanation.
 
-All four Wasm runtime modes, including CoreCLR R2R, load continuous history
-from their public `allTestHistory` indexes. Installed direct Helix snapshots
-still augment the catalog and history chart by the existing strict key
+All four Wasm configurations, including CoreCLR R2R, use public
+`allTestHistory` indexes and generated benchmark-history pages as their primary
+source. Installed direct Helix snapshots augment the catalog and history chart
+only as an offline fallback for benchmarks already present in the corresponding
+public index; fallback-only benchmark identities do not inflate catalog counts.
+Published histories merge fallback points by the existing strict key
 (`timestamp + runtime SHA + performance SHA`); an equivalent published point
 wins, while a value or duplicate-cardinality conflict is surfaced instead of
-silently selecting one. Unmatched direct points use diamond markers, retain
-raw samples and errors, and show their snapshot/build source in the hover card.
+silently selecting one. The **CoreCLR Wasm R2R** public index is
+`CompilationMode=wasm_R2RType=r2r_RunKind=micro_RuntimeType=coreclr`.
+Fallback-only points use diamond markers and dashed gap-aware guides, retain
+their snapshot/build provenance in the hover card, and never replace or
+interpolate published observations. Rolling variability still requires the
+configured minimum observation window.
 
-The bundled `DataSets/direct-history.json.gz` file is a temporary compact
-latest-build cache, not the canonical direct-run model. It is deterministically
+The bundled `DataSets/direct-history.json.gz` file is a compact offline
+latest-build fallback, not the canonical history source. It is deterministically
 projected from full sanitized snapshots and retains exact benchmark identity,
 lane/build/partition provenance, mean, standard error, variance, sample count,
 validity, runtime/performance SHAs, and measurement timestamp. Raw sample arrays
@@ -401,10 +408,9 @@ dotnet run --project src/WasmBenchmarkHistory -- \
   /absolute/private/full-snapshot-archive/*.json.gz
 ```
 
-The full-snapshot directory is intentionally outside the public repository. It
-is the replaceable bridge to a future durable provider backed by ADX, blob
-storage, or restored public history. `IBenchmarkHistoryProvider` keeps the
-explorer's exact merge/comparison semantics independent of that storage choice.
+The full-snapshot directory is intentionally outside the public repository.
+`IBenchmarkHistoryProvider` keeps the explorer's exact fallback
+merge/comparison semantics independent of snapshot storage.
 
 For already acquired files, the lower-level manifest importer remains
 available:
@@ -497,8 +503,8 @@ running the app does not.
 - `Components/RegressionInvestigationPanel.razor` keeps within-run temporal
   analysis visually and semantically separate from strict runtime comparison.
 - `Data/BenchmarkIndexParser.cs` catalogs links from the four published index
-  pages. `DirectSnapshotHistory.cs` adds valid snapshot identities and merges
-  exact direct observations only after a benchmark is selected.
+  pages. `DirectSnapshotHistory.cs` adds valid fallback snapshot identities and
+  merges exact observations only after a benchmark is selected.
 - `Data/BenchmarkHistoryParser.cs` extracts the `defaultCounter` primary trace
   from generated JavaScript as text. It never evaluates downloaded JavaScript.
 - `Data/ObservationMatcher.cs` joins observations only on timestamp, runtime
@@ -580,7 +586,7 @@ safe-link rejection, repro extraction, external-triage sanitization, heuristic
 thresholds, exact history mapping, missing/ambiguous SHA behavior, AzDO job
 discovery, lane mapping, partial partitions, combined perf-lab import,
 deterministic export, sensitive-data rejection, snapshot selection, direct
-catalog availability, source deduplication/conflicts, direct R2R augmentation,
+catalog availability, source deduplication/conflicts, R2R fallback history,
 four-way direct matching, and insufficient variability samples.
 
 ```bash
@@ -591,7 +597,8 @@ dotnet build WasmBenchmarkHistory.slnx
 ```
 
 The public live smoke test is read-only. It loads all four published indexes
-and one shared benchmark history from each published run configuration. GitHub Actions runs the
+and the supplied Fannkuch benchmark history from every published run
+configuration, asserting that R2R has more than six observations. GitHub Actions runs the
 ordinary restore, Release build, tests, and publish validation for pull requests
 and pushes to `main`. A separate daily/manual workflow runs the network-dependent
 live smoke so upstream availability does not gate ordinary changes. The

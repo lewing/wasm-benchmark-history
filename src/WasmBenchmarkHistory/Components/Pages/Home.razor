@@ -6,7 +6,7 @@
 <PageTitle>Wasm benchmark history</PageTitle>
 
 <section class="hero">
-    <p class="eyebrow">PUBLISHED + DIRECT PERFORMANCE DATA</p>
+    <p class="eyebrow">PUBLISHED HISTORY + VERIFIED FALLBACKS</p>
     <h1>Compare .NET Wasm performance across runtime modes.</h1>
     <p class="lede">
         Explore primary microbenchmark histories from <strong>dotnet/performance</strong>.
@@ -19,7 +19,7 @@
     <section class="loading-panel" aria-live="polite">
         <span class="spinner"></span>
         <div>
-            <strong>Loading published indexes and direct snapshots</strong>
+            <strong>Loading published indexes and fallback snapshots</strong>
             <p>History pages stay untouched until you choose a benchmark.</p>
         </div>
     </section>
@@ -209,9 +209,11 @@ else
     @if (DirectObservationCount > 0)
     {
         <div class="state-banner direct-source" role="status">
-            <strong>Temporary direct-run data.</strong>
-            <span>@DirectObservationCount direct Helix snapshot observation(s) from @DirectObservationRange
-                augment published history. Equivalent points prefer the published source, while conflicts fail visibly.</span>
+            <strong>Offline fallback observations.</strong>
+            <span>@DirectObservationCount bundled Helix snapshot observation(s) from @DirectObservationRange
+                fill gaps not present in published history.
+                Exact equivalent published points take precedence; conflicts fail visibly. Diamonds remain discrete
+                fallback observations, and dashed connectors are visual guides only.</span>
         </div>
     }
 

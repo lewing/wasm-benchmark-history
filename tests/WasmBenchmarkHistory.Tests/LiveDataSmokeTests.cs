@@ -42,13 +42,12 @@ public sealed class LiveDataSmokeTests
         var catalog = await service.LoadCatalogAsync();
         var benchmark = Assert.Single(
             catalog.Entries,
-            entry => entry.Benchmark == "ArrayDeAbstraction.foreach_member_array");
-        var selectedRuns = KnownRunConfigurations.All
-            .Where(run => benchmark.Pages.ContainsKey(run.Id))
-            .Select(run => run.Id)
-            .ToArray();
+            entry => entry.Benchmark ==
+                "BenchmarksGame.FannkuchRedux_2.RunBench(n: 10, expectedSum: 73196)");
+        var selectedRuns = KnownRunConfigurations.All.Select(run => run.Id).ToArray();
 
         Assert.Equal(4, selectedRuns.Length);
+        Assert.All(selectedRuns, runId => Assert.True(benchmark.Pages.ContainsKey(runId)));
         var histories = await service.LoadHistoriesAsync(
             catalog,
             benchmark.Benchmark,
@@ -56,9 +55,15 @@ public sealed class LiveDataSmokeTests
 
         Assert.Equal(4, histories.Count);
         Assert.All(histories, history => Assert.NotEmpty(history.Observations));
-        var r2r = Assert.Single(histories, history => history.Run.Id == "coreclr-wasm-r2r");
-        Assert.All(r2r.Observations, observation =>
-            Assert.Equal(ObservationSource.PublishedHistory, observation.Source));
-        _ = ObservationMatcher.MatchStrict(histories);
+        var r2r = Assert.Single(
+            histories,
+            history => history.Run.Id == "coreclr-wasm-r2r");
+        Assert.True(r2r.Observations.Count > 6);
+        Assert.All(
+            r2r.Observations,
+            observation => Assert.Equal(
+                ObservationSource.PublishedHistory,
+                observation.Source));
+        Assert.NotEmpty(ObservationMatcher.MatchStrict(histories));
     }
 }
