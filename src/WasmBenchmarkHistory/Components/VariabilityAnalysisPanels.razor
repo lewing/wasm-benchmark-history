@@ -18,16 +18,17 @@
             {
                 var range = MiniRange(series);
                 var unit = DurationFormatter.SelectUnit(range.Minimum, range.Maximum);
-                <article>
+                <article class="@SeriesFocusClass(series.History.Run.Id)">
                     <header>
-                        <span class="series-swatch" style="background:@series.History.Run.Color"></span>
+                        <span class="series-swatch @(series.IsDirectOnly ? "direct" : null)"
+                              style="--series-color:@series.History.Run.Color"></span>
                         <strong>@series.History.Run.DisplayName</strong>
                         <small>@FormatPanelValue(range.Minimum, unit)–@FormatPanelValue(range.Maximum, unit)</small>
                     </header>
                     <svg viewBox="0 0 1000 145"
                          preserveAspectRatio="none"
                          role="img"
-                         aria-label="@series.History.Run.DisplayName rolling median and interquartile range">
+                         aria-label="@PanelAccessibleLabel(series)">
                         <rect class="mini-background"
                               x="@MiniPlotLeft"
                               y="@MiniPlotTop"
@@ -61,11 +62,46 @@
                                       points="@MiniBandMedianPolyline(segment, range)"
                                       stroke="@series.History.Run.Color" />
                         }
-                        @foreach (var segment in PointSegments(series.Points))
+                        @foreach (var segment in PublishedPointSegments(series.Points))
                         {
                             <polyline class="mini-series-line"
                                       points="@MiniPolyline(segment, range)"
                                       stroke="@series.History.Run.Color" />
+                        }
+                        @foreach (var path in DirectConnectorPaths(series.Points, range))
+                        {
+                            <polyline class="mini-series-line direct-series-line"
+                                      points="@path"
+                                      stroke="@series.History.Run.Color" />
+                        }
+                        @foreach (var point in series.Points.Where(
+                            point => point.Source == ObservationSource.DirectSnapshot))
+                        {
+                            var x = MiniScaleX(point.Timestamp.Ticks);
+                            var y = MiniScaleY(point.Value, range);
+                            var marker = DirectSeriesPresentation.CreateMarker(
+                                series.History.Run.DisplayName,
+                                point.Timestamp,
+                                FormatPanelValue(point.Value, unit));
+                            <g class="@marker.CssClass"
+                               role="@marker.Role"
+                               aria-label="@marker.AccessibleLabel"
+                               data-source="direct-snapshot"
+                               data-marker-shape="@marker.Shape">
+                                <rect class="mini-direct-point-halo"
+                                      x="@(x - DirectSeriesPresentation.MiniMarkerHaloSize / 2)"
+                                      y="@(y - DirectSeriesPresentation.MiniMarkerHaloSize / 2)"
+                                      width="@DirectSeriesPresentation.MiniMarkerHaloSize"
+                                      height="@DirectSeriesPresentation.MiniMarkerHaloSize"
+                                      transform="rotate(45 @x @y)" />
+                                <rect class="mini-direct-point"
+                                      x="@(x - DirectSeriesPresentation.MiniMarkerSize / 2)"
+                                      y="@(y - DirectSeriesPresentation.MiniMarkerSize / 2)"
+                                      width="@DirectSeriesPresentation.MiniMarkerSize"
+                                      height="@DirectSeriesPresentation.MiniMarkerSize"
+                                      transform="rotate(45 @x @y)"
+                                      fill="@series.History.Run.Color" />
+                            </g>
                         }
 
                         @{
@@ -128,7 +164,7 @@
                 {
                     @foreach (var segment in VolatilitySegments(series.Volatility))
                     {
-                        <polyline class="volatility-line"
+                        <polyline class="volatility-line @(series.IsDirectOnly ? "direct-series-line" : null) @SeriesFocusClass(series.History.Run.Id)"
                                   points="@VolatilityPolyline(segment)"
                                   stroke="@series.History.Run.Color" />
                     }
@@ -186,6 +222,9 @@
     [Parameter]
     public DateTime? PinnedTimestamp { get; set; }
 
+    [Parameter]
+    public string? FocusedRunId { get; set; }
+
     private IReadOnlyList<PanelSeries> _series = [];
     private IReadOnlyList<BenchmarkHistory>? _lastHistories;
     private IReadOnlyList<MatchedComparison>? _lastMatches;
@@ -193,6 +232,7 @@
     private HistoryTimeRange? _lastTimeRange;
     private int _lastWindow;
     private DateTime? _lastPinnedTimestamp;
+    private string? _lastFocusedRunId;
     private long _minTicks;
     private long _maxTicks;
     private bool _shouldRender = true;
@@ -217,7 +257,8 @@
             || !ReferenceEquals(_lastMatches, Matches)
             || _lastNormalized != Normalized
             || _lastTimeRange != TimeRange
-            || _lastWindow != Window;
+            || _lastWindow != Window
+            || _lastFocusedRunId != FocusedRunId;
         var pinChanged = _lastPinnedTimestamp != PinnedTimestamp;
         _shouldRender = _lastHistories is null || dataChanged || pinChanged;
 
@@ -232,6 +273,7 @@
         _lastTimeRange = TimeRange;
         _lastWindow = Window;
         _lastPinnedTimestamp = PinnedTimestamp;
+        _lastFocusedRunId = FocusedRunId;
     }
 
     protected override bool ShouldRender() => _shouldRender;
@@ -260,7 +302,8 @@
                     history.Observations
                         .Select(observation => new PanelPoint(
                             observation.Timestamp,
-                            observation.Value))
+                            observation.Value,
+                            observation.Source))
                         .ToArray(),
                     visibleRange))
                 .Where(series => series.Points.Count > 0)
@@ -287,7 +330,8 @@
                         var baseline = match.Observations[baselineId];
                         return new PanelPoint(
                             observation.Timestamp,
-                            observation.Value / baseline.Value);
+                            observation.Value / baseline.Value,
+                            observation.Source);
                     })
                     .ToArray(),
                 visibleRange))
@@ -376,6 +420,26 @@
         IReadOnlyList<PanelPoint> points) =>
         TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
 
+    private IReadOnlyList<IReadOnlyList<PanelPoint>> PublishedPointSegments(
+        IReadOnlyList<PanelPoint> points) =>
+        PointSegments(points
+            .Where(point => point.Source == ObservationSource.PublishedHistory)
+            .ToArray())
+            .Where(segment => segment.Count >= 2)
+            .ToArray();
+
+    private IReadOnlyList<string> DirectConnectorPaths(
+        IReadOnlyList<PanelPoint> points,
+        ValueRange range) =>
+        DirectSeriesPresentation.BuildConnectorPaths(
+            points
+                .Where(point => point.Source == ObservationSource.DirectSnapshot)
+                .ToArray(),
+            point => point.Timestamp,
+            point => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{MiniScaleX(point.Timestamp.Ticks):0.##},{MiniScaleY(point.Value, range):0.##}"));
+
     private IReadOnlyList<IReadOnlyList<VariabilityBandPoint>> BandSegments(
         IReadOnlyList<VariabilityBandPoint> points) =>
         TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
@@ -444,13 +508,36 @@
             ? value.ToString("0.##", CultureInfo.InvariantCulture) + "%"
             : "—";
 
+    private string SeriesFocusClass(string runId) =>
+        FocusedRunId is null
+            ? ""
+            : string.Equals(FocusedRunId, runId, StringComparison.Ordinal)
+                ? "is-focused"
+                : "is-dimmed";
+
+    private static string PanelAccessibleLabel(PanelSeries series) =>
+        series.HasDirectSnapshots
+            ? $"{series.History.Run.DisplayName} observations; diamonds are discrete direct snapshots and dashed connectors are visual guides only"
+            : $"{series.History.Run.DisplayName} rolling median and interquartile range";
+
     private sealed record PanelSeries(
         BenchmarkHistory History,
         IReadOnlyList<PanelPoint> Points,
         IReadOnlyList<VariabilityBandPoint> Band,
-        IReadOnlyList<VolatilityPoint> Volatility);
+        IReadOnlyList<VolatilityPoint> Volatility)
+    {
+        public bool HasDirectSnapshots =>
+            Points.Any(point => point.Source == ObservationSource.DirectSnapshot);
 
-    private sealed record PanelPoint(DateTime Timestamp, double Value);
+        public bool IsDirectOnly =>
+            Points.Count > 0
+            && Points.All(point => point.Source == ObservationSource.DirectSnapshot);
+    }
+
+    private sealed record PanelPoint(
+        DateTime Timestamp,
+        double Value,
+        ObservationSource Source);
 
     private sealed record VolatilityPoint(DateTime Timestamp, double RelativeIqr);
 

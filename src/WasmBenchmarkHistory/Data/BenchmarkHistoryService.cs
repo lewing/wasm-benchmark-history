@@ -47,14 +47,26 @@ public sealed class BenchmarkHistoryService(
         {
             foreach (var direct in await provider.GetAvailabilityAsync())
             {
+                if (!pagesByBenchmark.TryGetValue(direct.Key, out var pages))
+                {
+                    continue;
+                }
+
+                var fallbackRuns = direct.Value
+                    .Where(pages.ContainsKey)
+                    .ToArray();
+                if (fallbackRuns.Length == 0)
+                {
+                    continue;
+                }
+
                 if (!directAvailability.TryGetValue(direct.Key, out var runs))
                 {
                     runs = new HashSet<string>(StringComparer.Ordinal);
                     directAvailability.Add(direct.Key, runs);
                 }
-                runs.UnionWith(direct.Value);
-                if (!pagesByBenchmark.ContainsKey(direct.Key))
-                    pagesByBenchmark.Add(direct.Key, new Dictionary<string, Uri>(StringComparer.Ordinal));
+
+                runs.UnionWith(fallbackRuns);
             }
         }
 

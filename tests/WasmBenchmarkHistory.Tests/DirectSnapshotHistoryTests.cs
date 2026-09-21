@@ -22,7 +22,7 @@ public sealed class DirectSnapshotHistoryTests
     }
 
     [Fact]
-    public void DirectOnlyR2RHistoryRetainsSamplesAndProvenance()
+    public void R2RFallbackHistoryRetainsSamplesAndProvenance()
     {
         var snapshot = Snapshot("3074629", Measurement("Run", 10));
         var run = KnownRunConfigurations.Get("coreclr-wasm-r2r");
@@ -74,6 +74,37 @@ public sealed class DirectSnapshotHistoryTests
             "N.T.Run", "mono-wasm", [published], [direct with { Value = 11 }]);
         Assert.Same(published, Assert.Single(conflict.Observations));
         Assert.Single(conflict.Conflicts);
+    }
+
+    [Fact]
+    public void MergeAppendsOnlyFallbackObservationsMissingFromPublishedHistory()
+    {
+        var publishedTimestamp = new DateTime(2026, 9, 13, 14, 59, 42);
+        var fallbackTimestamp = publishedTimestamp.AddDays(1);
+        var published = Observation(
+            publishedTimestamp,
+            10,
+            ObservationSource.PublishedHistory);
+        var equivalentFallback = Observation(
+            publishedTimestamp,
+            10,
+            ObservationSource.DirectSnapshot);
+        var missingFallback = Observation(
+            fallbackTimestamp,
+            11,
+            ObservationSource.DirectSnapshot);
+
+        var merged = DirectSnapshotHistory.MergeObservations(
+            "N.T.Run",
+            "coreclr-wasm-r2r",
+            [published],
+            [equivalentFallback, missingFallback]);
+
+        Assert.Collection(
+            merged.Observations,
+            observation => Assert.Equal(ObservationSource.PublishedHistory, observation.Source),
+            observation => Assert.Equal(ObservationSource.DirectSnapshot, observation.Source));
+        Assert.Empty(merged.Conflicts);
     }
 
     [Fact]

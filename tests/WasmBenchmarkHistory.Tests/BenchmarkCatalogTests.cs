@@ -5,6 +5,30 @@ namespace WasmBenchmarkHistory.Tests;
 public sealed class BenchmarkCatalogTests
 {
     [Fact]
+    public void R2RRunUsesPublishedHistoryAndCanAlsoExposeFallbackAvailability()
+    {
+        var run = KnownRunConfigurations.Get("coreclr-wasm-r2r");
+        var catalog = new BenchmarkCatalog(
+        [
+            new(
+                "N.T.Run",
+                new Dictionary<string, Uri>
+                {
+                    [run.Id] = new Uri(run.IndexUri!, "N.T.Run.html")
+                },
+                new HashSet<string>([run.Id], StringComparer.Ordinal))
+        ]);
+
+        var entry = Assert.Single(catalog.Entries);
+        Assert.NotNull(run.IndexUri);
+        Assert.Contains("R2RType=r2r", Uri.UnescapeDataString(run.IndexUri.AbsoluteUri));
+        Assert.Equal("CoreCLR Wasm R2R", run.DisplayName);
+        Assert.True(entry.Pages.ContainsKey(run.Id));
+        Assert.Contains(run.Id, entry.DirectRuns);
+        Assert.True(entry.IsAvailable(run.Id));
+    }
+
+    [Fact]
     public void Constructor_BuildsNamespaceAndTypeCategoryTree()
     {
         var catalog = new BenchmarkCatalog(

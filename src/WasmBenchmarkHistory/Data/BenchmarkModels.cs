@@ -33,10 +33,10 @@ public static class KnownRunConfigurations
             "CoreCLR Wasm microbenchmarks"),
         new(
             "coreclr-wasm-r2r",
-            "CoreCLR Wasm R2R (direct snapshots)",
-            null,
+            "CoreCLR Wasm R2R",
+            new Uri(BaseUrl + "/reports/allTestHistory/refs/heads/main_x64_ubuntu%2022.04_CompilationMode=wasm_R2RType=r2r_RunKind=micro_RuntimeType=coreclr/ViperUbuntu/AllTestindex.html"),
             "#d56bff",
-            "Temporary direct Helix snapshots; no continuous public history yet")
+            "CoreCLR Wasm ReadyToRun microbenchmarks")
     ];
 
     public static IReadOnlyList<RunConfiguration> Published { get; } =
