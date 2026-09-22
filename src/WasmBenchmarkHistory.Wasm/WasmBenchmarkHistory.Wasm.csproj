@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="11.0.0-preview.6.26351.102" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Gateway" Version="11.0.0-preview.6.26351.102" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WasmBenchmarkHistory.Core\WasmBenchmarkHistory.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    Same bundled build snapshots the server app ships (single source of truth, linked rather
+    than copied) so the standalone WASM app can fetch them over HTTP instead of the filesystem.
+  -->
+  <ItemGroup>
+    <Content Include="..\WasmBenchmarkHistory\DataSets\*.json.gz"
+             Link="wwwroot\DataSets\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Static hosting (GitHub Pages) has no directory listing, so generate a manifest of the
+    available build ids on every build/publish from the same DataSets directory above.
+  -->
+  <UsingTask TaskName="GenerateDataSetManifest" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <SourceDirectory ParameterType="System.String" Required="true" />
+      <OutputPath ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var ids = Directory.EnumerateFiles(SourceDirectory, "*.json.gz")
+            .Select(path => Path.GetFileName(path))
+            .Where(name => name != "direct-history.json.gz")
+            .Select(name => name.Substring(0, name.Length - ".json.gz".Length))
+            .OrderByDescending(id => long.TryParse(id, out var number) ? number : long.MinValue)
+            .ToArray();
+        var json = "[" + string.Join(",", ids.Select(id => "\"" + id.Replace("\"", "\\\"") + "\"")) + "]";
+        Directory.CreateDirectory(Path.GetDirectoryName(OutputPath));
+        File.WriteAllText(OutputPath, json);
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="GenerateManifest" BeforeTargets="BeforeBuild">
+    <GenerateDataSetManifest
+        SourceDirectory="$(MSBuildThisFileDirectory)..\WasmBenchmarkHistory\DataSets"
+        OutputPath="$(MSBuildThisFileDirectory)wwwroot\DataSets\manifest.json" />
+  </Target>
+
+</Project>

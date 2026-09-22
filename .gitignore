@@ -5,3 +5,6 @@
 *.user
 *.suo
 TestResults/
+
+# Generated at build time by WasmBenchmarkHistory.Wasm's GenerateManifest target.
+src/WasmBenchmarkHistory.Wasm/wwwroot/DataSets/manifest.json

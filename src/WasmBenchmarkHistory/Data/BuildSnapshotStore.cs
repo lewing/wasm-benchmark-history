@@ -1,26 +1,13 @@
 namespace WasmBenchmarkHistory.Data;
 
-public sealed record BuildSnapshotDescriptor(
-    string BuildId,
-    string BuildNumber,
-    string CaptureSource,
-    DateTimeOffset? CapturedAt);
-
-public sealed class BuildSnapshotStore(IWebHostEnvironment environment)
+public sealed class BuildSnapshotStore(IWebHostEnvironment environment) : IBuildSnapshotStore
 {
     private readonly string _directory = Path.Combine(environment.ContentRootPath, "DataSets");
 
     public string[] GetBuildIds() => Directory.Exists(_directory)
-        ? OrderBuildIds(Directory.EnumerateFiles(_directory, "*.json.gz")
+        ? BuildSnapshotStoreOrdering.OrderBuildIds(Directory.EnumerateFiles(_directory, "*.json.gz")
             .Select(path => Path.GetFileName(path)[..^8]))
         : [];
-
-    public static string[] OrderBuildIds(IEnumerable<string> buildIds) =>
-        buildIds.Select(id => (Id: id, Numeric: long.TryParse(id, out var value) ? value : (long?)null))
-            .Where(value => value.Numeric is not null)
-            .OrderByDescending(value => value.Numeric)
-            .ThenByDescending(value => value.Id, StringComparer.Ordinal)
-            .Select(value => value.Id).ToArray();
 
     public Task<BuildSnapshot> LoadAsync(string buildId)
     {

@@ -96,7 +96,12 @@ public static class DirectHistoryArchiveBuilder
     public static async Task<DirectHistoryArchive> ReadAsync(string path)
     {
         await using var file = File.OpenRead(path);
-        await using var gzip = new GZipStream(file, CompressionMode.Decompress);
+        return await ReadAsync(file);
+    }
+
+    public static async Task<DirectHistoryArchive> ReadAsync(Stream stream)
+    {
+        await using var gzip = new GZipStream(stream, CompressionMode.Decompress);
         var archive = await JsonSerializer.DeserializeAsync<DirectHistoryArchive>(
             gzip, BuildSnapshotImporter.JsonOptions)
             ?? throw new InvalidDataException("Empty direct history archive.");
@@ -209,74 +214,6 @@ public static class DirectHistoryArchiveBuilder
         int.TryParse(name.AsSpan("Partition".Length), out var number) ? number : int.MaxValue;
 }
 
-public static class DirectHistoryRefresh
-{
-    public static async Task<DirectHistoryArchive> BuildAsync(
-        IEnumerable<string> snapshotPaths,
-        string outputPath,
-        int retention,
-        DateTimeOffset generatedAt)
-    {
-        var snapshots = new List<BuildSnapshot>();
-        foreach (var path in snapshotPaths.Order(StringComparer.Ordinal))
-            snapshots.Add(await BuildSnapshotImporter.ReadAsync(path));
-        var archive = DirectHistoryArchiveBuilder.Create(snapshots, retention, generatedAt);
-        await DirectHistoryArchiveBuilder.WriteAsync(archive, outputPath);
-        return archive;
-    }
-
-    public static async Task<DirectHistoryArchive> RefreshAsync(
-        IEnumerable<string> builds,
-        string fullArchiveDirectory,
-        string outputPath,
-        int retention)
-    {
-        fullArchiveDirectory = Path.GetFullPath(fullArchiveDirectory);
-        DirectRunAcquirer.ValidateCacheDirectory(fullArchiveDirectory);
-        Directory.CreateDirectory(fullArchiveDirectory);
-        var acquirer = new DirectRunAcquirer();
-        var acquisitionExclusions = new List<DirectHistoryExclusion>();
-        var requested = builds.ToArray();
-        var automatic = requested.Length == 0;
-        if (automatic)
-            requested = await acquirer.DiscoverCandidateBuildsAsync(Math.Max(50, retention * 5));
-        var completeCandidates = 0;
-        foreach (var build in requested)
-        {
-            var buildUrl = DirectRunAcquirer.NormalizeBuildUrl(build);
-            var buildId = System.Web.HttpUtility.ParseQueryString(new Uri(buildUrl).Query)["buildId"]!;
-            var snapshotPath = Path.Combine(fullArchiveDirectory, buildId + ".json.gz");
-            try
-            {
-                var snapshot = File.Exists(snapshotPath)
-                    ? await BuildSnapshotImporter.ReadAsync(snapshotPath)
-                    : await acquirer.AcquireAsync(buildUrl, snapshotPath);
-                var projected = DirectHistoryArchiveBuilder.Create(
-                    [snapshot], 1, DateTimeOffset.UnixEpoch);
-                if (projected.Builds.Length == 1)
-                    completeCandidates++;
-            }
-            catch (Exception exception) when (exception is IOException or InvalidDataException
-                or HttpRequestException or InvalidOperationException)
-            {
-                acquisitionExclusions.Add(new(buildId,
-                    $"Acquisition failed: {exception.GetType().Name}."));
-            }
-            if (automatic && completeCandidates >= retention)
-                break;
-        }
-        var snapshots = new List<BuildSnapshot>();
-        foreach (var path in Directory.EnumerateFiles(fullArchiveDirectory, "*.json.gz")
-            .Where(path => long.TryParse(Path.GetFileName(path)[..^8], out _))
-            .Order(StringComparer.Ordinal))
-            snapshots.Add(await BuildSnapshotImporter.ReadAsync(path));
-        var archive = DirectHistoryArchiveBuilder.Create(
-            snapshots, retention, DateTimeOffset.UtcNow, acquisitionExclusions);
-        await DirectHistoryArchiveBuilder.WriteAsync(archive, outputPath);
-        return archive;
-    }
-}
-
 public sealed record DirectHistoryTrendCell(
     string Status,
     double? Mean,
@@ -351,32 +288,35 @@ public interface IBenchmarkHistoryProvider
     Task<BenchmarkHistory?> LoadAsync(string benchmark, RunConfiguration run);
 }
 
-public sealed class BundledDirectHistoryProvider(IWebHostEnvironment environment)
-    : IBenchmarkHistoryProvider
+/// <summary>
+/// Exposes the raw bundled <see cref="DirectHistoryArchive"/>, for callers (like the
+/// Compare Builds trend widget) that need the whole archive rather than a per-benchmark view.
+/// </summary>
+public interface IDirectHistoryArchiveSource
 {
-    private readonly string _path = Path.Combine(
-        environment.ContentRootPath, "DataSets", "direct-history.json.gz");
-    private Task<DirectHistoryArchive?>? _archiveTask;
+    Task<DirectHistoryArchive?> LoadArchiveAsync();
+}
 
-    public async Task<IReadOnlyDictionary<string, IReadOnlySet<string>>> GetAvailabilityAsync()
+/// <summary>
+/// Shared helpers for <see cref="IBenchmarkHistoryProvider"/> implementations that load a
+/// single bundled <see cref="DirectHistoryArchive"/> regardless of how the bytes are obtained
+/// (local filesystem in the server app, HTTP fetch in the WebAssembly app).
+/// </summary>
+public static class DirectHistoryProviderHelper
+{
+    public static async Task<IReadOnlyDictionary<string, IReadOnlySet<string>>> GetAvailabilityAsync(
+        Func<Task<DirectHistoryArchive?>> loadArchiveAsync)
     {
-        var archive = await LoadArchiveAsync();
+        var archive = await loadArchiveAsync();
         return archive is null
             ? new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
             : DirectSnapshotHistory.GetAvailability(archive.Builds);
     }
 
-    public async Task<BenchmarkHistory?> LoadAsync(string benchmark, RunConfiguration run)
+    public static async Task<BenchmarkHistory?> LoadAsync(
+        Func<Task<DirectHistoryArchive?>> loadArchiveAsync, string benchmark, RunConfiguration run)
     {
-        var archive = await LoadArchiveAsync();
+        var archive = await loadArchiveAsync();
         return archive is null ? null : DirectSnapshotHistory.CreateHistory(benchmark, run, archive.Builds);
     }
-
-    public Task<DirectHistoryArchive?> LoadArchiveAsync() =>
-        _archiveTask ??= File.Exists(_path)
-            ? ReadArchiveAsync()
-            : Task.FromResult<DirectHistoryArchive?>(null);
-
-    private async Task<DirectHistoryArchive?> ReadArchiveAsync() =>
-        await DirectHistoryArchiveBuilder.ReadAsync(_path);
 }

@@ -49,3 +49,6 @@ jobs:
 
       - name: Validate publish output
         run: dotnet publish src/WasmBenchmarkHistory/WasmBenchmarkHistory.csproj --configuration Release --no-build --no-restore --nologo --output artifacts/publish
+
+      - name: Validate Compare Builds WASM publish output
+        run: dotnet publish src/WasmBenchmarkHistory.Wasm/WasmBenchmarkHistory.Wasm.csproj --configuration Release --no-restore --nologo --output artifacts/publish-wasm

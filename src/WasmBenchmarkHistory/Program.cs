@@ -114,8 +114,12 @@ builder.Services.AddHttpClient<PerfAutofilingIssueClient>((services, client) =>
     AllowAutoRedirect = false
 });
 builder.Services.AddSingleton<BuildSnapshotStore>();
+builder.Services.AddSingleton<IBuildSnapshotStore>(
+    services => services.GetRequiredService<BuildSnapshotStore>());
 builder.Services.AddSingleton<BundledDirectHistoryProvider>();
 builder.Services.AddSingleton<IBenchmarkHistoryProvider>(
+    services => services.GetRequiredService<BundledDirectHistoryProvider>());
+builder.Services.AddSingleton<IDirectHistoryArchiveSource>(
     services => services.GetRequiredService<BundledDirectHistoryProvider>());
 
 var app = builder.Build();

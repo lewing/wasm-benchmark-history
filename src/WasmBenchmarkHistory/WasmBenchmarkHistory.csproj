@@ -11,4 +11,8 @@
     <Content Include="DataSets/*.json.gz" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\WasmBenchmarkHistory.Core\WasmBenchmarkHistory.Core.csproj" />
+  </ItemGroup>
+
 </Project>

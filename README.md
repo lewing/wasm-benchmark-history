@@ -245,6 +245,28 @@ Different machines, measurement counts, and benchmark variability limit the
 interpretation of a single build. These descriptive speedups are not statistical
 significance claims.
 
+### Standalone static build (GitHub Pages)
+
+`src/WasmBenchmarkHistory.Wasm` is a Blazor **WebAssembly** (client-only) app
+that reproduces this same comparison view without a server. It shares its
+comparison logic with the server app via `src/WasmBenchmarkHistory.Core` (no
+ASP.NET Core dependency), and fetches the bundled `DataSets/*.json.gz`
+snapshots over plain HTTP instead of reading them from the local filesystem. A
+`manifest.json` listing available build ids is generated at build time since
+static hosts have no directory listing.
+
+Run it locally:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory.Wasm
+```
+
+`.github/workflows/deploy-compare-builds.yml` publishes this project and
+deploys `wwwroot` to GitHub Pages on every push to `main` that touches it (or
+via manual dispatch). It rewrites `<base href="/">` to the repository's Pages
+path automatically, so no manual configuration is needed beyond enabling
+Pages with the "GitHub Actions" source in the repository settings.
+
 ### Included snapshots
 
 #### Build 3074629
@@ -535,6 +557,12 @@ running the app does not.
   speedups.
 - `Components/Pages/CompareBuilds.razor` presents the four-runtime snapshot
   comparison independently of the historical data source.
+- `WasmBenchmarkHistory.Core` (separate project) hosts the hosting-agnostic
+  pieces of the above (models, `BuildComparison`, `DirectHistoryArchive`
+  read/parse logic) so they can be shared with the WebAssembly app below.
+- `WasmBenchmarkHistory.Wasm` (separate project) is the standalone client-only
+  build of the Compare Builds page for GitHub Pages; see "Standalone static
+  build" above.
 
 ## Data safety and errors
 

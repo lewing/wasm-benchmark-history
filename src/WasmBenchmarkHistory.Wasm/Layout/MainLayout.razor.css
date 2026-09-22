@@ -1,0 +1,25 @@
+main {
+    margin: 0 auto;
+    max-width: 1440px;
+    padding: 1.5rem clamp(1rem, 4vw, 3.5rem) 4rem;
+}
+
+#blazor-error-ui {
+    background: #ffdf8b;
+    bottom: 0;
+    box-shadow: 0 -1px 8px rgb(0 0 0 / 20%);
+    box-sizing: border-box;
+    color: #211700;
+    display: none;
+    left: 0;
+    padding: .8rem 3rem .8rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 1rem;
+}

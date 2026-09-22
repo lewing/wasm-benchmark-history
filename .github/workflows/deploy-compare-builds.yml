@@ -1,0 +1,74 @@
+name: Deploy Compare Builds (Blazor WASM) to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/WasmBenchmarkHistory.Wasm/**"
+      - "src/WasmBenchmarkHistory.Core/**"
+      - "src/WasmBenchmarkHistory/DataSets/**"
+      - ".github/workflows/deploy-compare-builds.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Publish and package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 11.0.x
+          dotnet-quality: preview
+
+      - name: Restore
+        run: dotnet restore src/WasmBenchmarkHistory.Wasm/WasmBenchmarkHistory.Wasm.csproj --nologo
+
+      - name: Publish
+        run: |
+          dotnet publish src/WasmBenchmarkHistory.Wasm/WasmBenchmarkHistory.Wasm.csproj \
+            --configuration Release --no-restore --nologo \
+            --output artifacts/publish
+
+      - name: Set base href for the GitHub Pages project path
+        run: |
+          repo="${GITHUB_REPOSITORY##*/}"
+          if [[ "$repo" == *.github.io ]]; then
+            base="/"
+          else
+            base="/$repo/"
+          fi
+          echo "Using base href '$base'"
+          sed -i "s#<base href=\"/\" />#<base href=\"$base\" />#" \
+            artifacts/publish/wwwroot/index.html artifacts/publish/wwwroot/404.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: artifacts/publish/wwwroot
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-22.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

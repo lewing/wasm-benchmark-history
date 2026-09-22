@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Redirecting…</title>
+    <base href="/" />
+    <script>
+        // GitHub Pages has no server-side routing, so unknown paths 404. Redirect back to the
+        // SPA root, preserving the original path/query/hash so Blazor's router can restore it.
+        var basePath = document.querySelector('base').getAttribute('href');
+        var redirect = location.pathname.slice(basePath.length) + location.search + location.hash;
+        location.replace(basePath + '?redirect=' + encodeURIComponent(redirect));
+    </script>
+</head>
+
+<body>
+</body>
+
+</html>
