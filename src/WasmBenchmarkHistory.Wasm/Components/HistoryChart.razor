@@ -1,0 +1,1096 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="chart-shell">
+    <div class="chart-toolbar">
+        <fieldset>
+            <legend>Time range</legend>
+            @foreach (var option in RangeOptions)
+            {
+                <button type="button"
+                        class="@(TimeRange.Kind == option.Range.Kind ? "active" : null)"
+                        aria-pressed="@(TimeRange.Kind == option.Range.Kind)"
+                        @onclick="() => ChangeRangeAsync(option.Range)">
+                    @option.Label
+                </button>
+            }
+            <button type="button"
+                    class="reset-range"
+                    disabled="@(TimeRange.Kind == HistoryRangeKind.All)"
+                    @onclick="ResetRangeAsync">
+                Reset
+            </button>
+        </fieldset>
+        <fieldset class="band-controls">
+            <legend>Variability</legend>
+            <label>
+                <input type="checkbox"
+                       checked="@ShowVariabilityBand"
+                       @onchange="OnVariabilityBandChanged" />
+                Variability analysis
+            </label>
+            <select value="@VariabilityWindow"
+                    disabled="@(!ShowVariabilityBand)"
+                    aria-label="Variability band observation window"
+                    @onchange="OnVariabilityWindowChanged">
+                @foreach (var window in RollingVariabilityCalculator.SupportedWindows)
+                {
+                    <option value="@window">@window observations</option>
+                }
+            </select>
+        </fieldset>
+        <span class="zoom-help">
+            @(TimeRange.Kind == HistoryRangeKind.Custom
+                ? $"{TimeRange.Start:yyyy-MM-dd} – {TimeRange.End:yyyy-MM-dd}"
+                : ShowVariabilityBand
+                    ? $"Aligned {VariabilityWindow}-observation median/IQR and relative-IQR panels"
+                    : "Drag across the plot to zoom")
+        </span>
+    </div>
+
+    @if (DirectCount > 0)
+    {
+        <div id="direct-snapshot-note" class="direct-note">
+            Diamond markers are bundled fallback observations used only where published history has no exact
+            timestamp/runtime/performance match. Dashed connectors are visual guides between consecutive fallback
+            observations and break across long gaps; they do not imply continuous published history.
+        </div>
+    }
+
+    @if (Series.Count == 0)
+    {
+        <div class="chart-empty">
+            <strong>@(Normalized ? "No strict matched points in this range." : "No observations in this range.")</strong>
+            <span>Choose a wider time range or reset the chart.</span>
+        </div>
+    }
+    else
+    {
+        <div class="legend" aria-label="Chart series">
+            @foreach (var series in Series)
+            {
+                <button type="button"
+                        class="legend-item @SeriesFocusClass(series.History.Run.Id)"
+                        style="--series-color:@series.History.Run.Color"
+                        aria-pressed="@(_seriesFocus.IsFocused(series.History.Run.Id).ToString().ToLowerInvariant())"
+                        aria-label="@LegendFocusLabel(series)"
+                        @onclick="() => ToggleSeriesFocus(series.History.Run.Id)">
+                    <span class="legend-symbol @(series.IsDirectOnly ? "direct" : "published")"
+                          aria-hidden="true">
+                        <i></i>
+                    </span>
+                    <span class="legend-copy">
+                        <strong>@series.History.Run.DisplayName</strong>
+                        <small>@series.Points.Count.ToString("N0") visible points@(DirectSuffix(series.History))</small>
+                    </span>
+                </button>
+            }
+            @if (_seriesFocus.FocusedRunId is not null)
+            {
+                <button type="button"
+                        class="legend-reset"
+                        @onclick="ShowAllSeries">
+                    Show all
+                </button>
+            }
+            <span class="visually-hidden" role="status" aria-live="polite">@SeriesFocusStatus</span>
+        </div>
+
+        <div class="plot-area" @onkeydown="OnPlotKeyDown">
+            <div class="svg-wrap">
+                <svg @ref="_chartElement"
+                     class="@(_selectionState.IsPinned ? "selection-pinned" : null)"
+                     viewBox="0 0 1000 430"
+                     preserveAspectRatio="none"
+                     role="img"
+                     aria-label="Historical benchmark line chart"
+                     aria-describedby="@(DirectCount > 0
+                         ? "chart-hover-instructions direct-snapshot-note"
+                         : "chart-hover-instructions")"
+                     @onpointerleave="OnChartPointerLeave">
+                    <rect class="plot-background" x="@PlotLeft" y="@PlotTop" width="@PlotWidth" height="@PlotHeight" rx="8" />
+
+                    @for (var tick = 0; tick <= 4; tick++)
+                    {
+                        var y = PlotTop + PlotHeight * tick / 4d;
+                        <line class="grid-line" x1="@PlotLeft" y1="@y" x2="@(PlotLeft + PlotWidth)" y2="@y" />
+                        <svg:text class="axis-label" x="@(PlotLeft - 12)" y="@(y + 4)" text-anchor="end">
+                            @FormatAxisValue(MaxY - (MaxY - MinY) * tick / 4d)
+                        </svg:text>
+                    }
+
+                    @for (var tick = 0; tick <= 4; tick++)
+                    {
+                        var x = PlotLeft + PlotWidth * tick / 4d;
+                        <line class="grid-line vertical" x1="@x" y1="@PlotTop" x2="@x" y2="@(PlotTop + PlotHeight)" />
+                        <svg:text class="axis-label" x="@x" y="@(PlotTop + PlotHeight + 28)" text-anchor="middle">
+                            @FormatDate(MinTicks + (long)((MaxTicks - MinTicks) * tick / 4d))
+                        </svg:text>
+                    }
+
+                    @foreach (var series in Series)
+                    {
+                        <g class="series-group @SeriesFocusClass(series.History.Run.Id)">
+                            @foreach (var segment in PublishedPointSegments(series.Points))
+                            {
+                                <polyline class="series-line"
+                                          points="@Polyline(segment)"
+                                          stroke="@series.History.Run.Color" />
+                            }
+
+                            @foreach (var path in DirectConnectorPaths(series.Points))
+                            {
+                                <polyline class="series-line direct-series-line"
+                                          points="@path"
+                                          stroke="@series.History.Run.Color" />
+                            }
+
+                            @foreach (var point in DisplayPoints(series.Points))
+                            {
+                                @if (point.Source == ObservationSource.DirectSnapshot)
+                                {
+                                    var marker = DirectMarker(series, point);
+                                    var x = ScaleX(point.Timestamp.Ticks);
+                                    var y = ScaleY(point.Value);
+                                    <g class="@marker.CssClass"
+                                       role="@marker.Role"
+                                       aria-label="@marker.AccessibleLabel"
+                                       data-source="direct-snapshot"
+                                       data-marker-shape="@marker.Shape">
+                                        <rect class="direct-point-halo"
+                                              x="@(x - DirectSeriesPresentation.MarkerHaloSize / 2)"
+                                              y="@(y - DirectSeriesPresentation.MarkerHaloSize / 2)"
+                                              width="@DirectSeriesPresentation.MarkerHaloSize"
+                                              height="@DirectSeriesPresentation.MarkerHaloSize"
+                                              transform="rotate(45 @x @y)" />
+                                        <rect class="series-point direct-point"
+                                              x="@(x - DirectSeriesPresentation.MarkerSize / 2)"
+                                              y="@(y - DirectSeriesPresentation.MarkerSize / 2)"
+                                              width="@DirectSeriesPresentation.MarkerSize"
+                                              height="@DirectSeriesPresentation.MarkerSize"
+                                              transform="rotate(45 @x @y)"
+                                              fill="@series.History.Run.Color" />
+                                    </g>
+                                }
+                                else
+                                {
+                                    <circle class="series-point"
+                                            cx="@ScaleX(point.Timestamp.Ticks)"
+                                            cy="@ScaleY(point.Value)"
+                                            r="3.2"
+                                            fill="@series.History.Run.Color" />
+                                }
+                            }
+                        </g>
+                    }
+
+                    @foreach (var marker in VisiblePinMarkers)
+                    {
+                        var markerX = ScaleX(marker.Pin.Identity.Timestamp.Ticks);
+                        <line class="pin-line @marker.CssClass"
+                              x1="@markerX"
+                              y1="@PlotTop"
+                              x2="@markerX"
+                              y2="@(PlotTop + PlotHeight)" />
+                        <circle class="pin-badge @marker.CssClass"
+                                cx="@markerX"
+                                cy="@(PlotTop + (marker.Slot == InvestigationPinSlot.BaselineA ? 13 : 34))"
+                                r="11" />
+                        <svg:text class="pin-label"
+                                  x="@markerX"
+                                  y="@(PlotTop + (marker.Slot == InvestigationPinSlot.BaselineA ? 17 : 38))"
+                                  text-anchor="middle">
+                            @(marker.Slot == InvestigationPinSlot.BaselineA ? "A" : "B")
+                        </svg:text>
+                    }
+
+                    @if (_hover is not null)
+                    {
+                        <line class="hover-crosshair @(_selectionState.IsPinned ? "pinned" : null)"
+                              x1="@ScaleX(_hover.Timestamp.Ticks)"
+                              y1="@PlotTop"
+                              x2="@ScaleX(_hover.Timestamp.Ticks)"
+                              y2="@(PlotTop + PlotHeight)" />
+                        @foreach (var point in _hover.Points)
+                        {
+                            <circle class="hover-point-halo @(_selectionState.IsPinned ? "pinned" : null) @SeriesFocusClass(point.History.Run.Id)"
+                                    cx="@ScaleX(point.Observation.Timestamp.Ticks)"
+                                    cy="@ScaleY(point.DisplayValue)"
+                                    r="8"
+                                    fill="@point.History.Run.Color" />
+                            <circle class="hover-point @(_selectionState.IsPinned ? "pinned" : null) @SeriesFocusClass(point.History.Run.Id)"
+                                    cx="@ScaleX(point.Observation.Timestamp.Ticks)"
+                                    cy="@ScaleY(point.DisplayValue)"
+                                    r="4.5"
+                                    fill="@point.History.Run.Color" />
+                        }
+                    }
+
+                    <rect class="zoom-selection"
+                          x="@PlotLeft"
+                          y="@PlotTop"
+                          width="0"
+                          height="@PlotHeight" />
+
+                    @foreach (var region in _hitRegions)
+                    {
+                        <rect class="interaction-band"
+                              @key="region.TimelineIndex"
+                              x="@region.X"
+                              y="@PlotTop"
+                              width="@region.Width"
+                              height="@PlotHeight"
+                              @onpointerenter="() => HoverTimeline(region.TimelineIndex)" />
+                    }
+                </svg>
+            </div>
+
+            <input @ref="_scrubberElement"
+                   class="keyboard-scrubber"
+                   type="range"
+                   min="0"
+                   max="@Math.Max(0, _hoverIndex.Timestamps.Count - 1)"
+                   step="1"
+                   value="@(_hover?.TimelineIndex ?? Math.Max(0, _hoverIndex.Timestamps.Count - 1))"
+                   aria-label="Chart timestamp"
+                   aria-valuetext="@KeyboardValueText"
+                   aria-describedby="@(_hover is null ? "chart-hover-instructions" : "chart-hover-instructions chart-hover-card")"
+                   @onfocus="OnScrubberFocus"
+                   @onblur="OnScrubberBlur"
+                   @oninput="OnScrubberInput" />
+
+            @if (_hover is not null)
+            {
+                <aside id="chart-hover-card"
+                       class="hover-card @(_selectionState.IsPinned ? "pinned" : "preview") @(_hoverCardPercent > 63 ? "flip" : null)"
+                       style="left:@(_hoverCardPercent.ToString("0.##", CultureInfo.InvariantCulture))%"
+                       aria-label="Selected chart observation details">
+                    <header>
+                        <div aria-live="@(_hasKeyboardFocus ? "polite" : "off")">
+                            <span class="selection-status">@(_selectionState.IsPinned ? "PINNED SELECTION" : "READ-ONLY PREVIEW")</span>
+                            <strong>@_hover.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</strong>
+                            <small>@(_hover.HasStrictComparison ? "Strict build match" : "Nearest samples")</small>
+                        </div>
+                        @if (_selectionState.IsPinned)
+                        {
+                            <button type="button"
+                                    class="close-card"
+                                    aria-label="Unpin and close observation details"
+                                    @onclick="ClearPinnedSelection">
+                                ×
+                            </button>
+                        }
+                    </header>
+
+                    <div class="hover-runs">
+                        @foreach (var point in _hover.Points)
+                        {
+                            var identity = ObservationIdentity.From(point.Observation);
+                            var unit = DurationFormatter.SelectUnit(point.Observation.Value);
+                            <section class="@SeriesFocusClass(point.History.Run.Id)">
+                                <div class="hover-run-heading">
+                                    <i style="background:@point.History.Run.Color"></i>
+                                    <strong>@point.History.Run.DisplayName</strong>
+                                    @if (!point.IsExactTimestamp)
+                                    {
+                                        <small>nearest @point.Observation.Timestamp.ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</small>
+                                    }
+                                </div>
+                                <div class="hover-measure">
+                                    <span>Value</span>
+                                    <strong title="@DurationFormatter.FormatExactNanoseconds(point.Observation.Value)"
+                                            aria-label="@DurationFormatter.FormatExactNanoseconds(point.Observation.Value)">
+                                        @DurationFormatter.Format(point.Observation.Value, unit)
+                                        @if (point.Observation.Error is not null)
+                                        {
+                                            <text> ± @DurationFormatter.Format(point.Observation.Error.Value, unit)</text>
+                                        }
+                                    </strong>
+                                    @if (point.StrictRatio is not null)
+                                    {
+                                        <em>@point.StrictRatio.Value.ToString("0.000×", CultureInfo.InvariantCulture)</em>
+                                    }
+                                </div>
+                                <small class="exact-value">
+                                    Exact: @DurationFormatter.FormatExactNanoseconds(point.Observation.Value)
+                                    @if (point.Observation.Error is not null)
+                                    {
+                                        <text> ± @DurationFormatter.FormatExactNanoseconds(point.Observation.Error)</text>
+                                    }
+                                </small>
+                                @if (ShowVariabilityBand)
+                                {
+                                    var variability = FindVariabilityPoint(
+                                        point.History.Run.Id,
+                                        point.Observation.Timestamp);
+                                    @if (variability is not null)
+                                    {
+                                        var variabilityUnit = DurationFormatter.SelectUnit(variability.Median);
+                                        <div class="hover-variability">
+                                            <span>rolling median @DurationFormatter.Format(variability.Median, variabilityUnit)</span>
+                                            <span>Q1–Q3 @DurationFormatter.Format(variability.FirstQuartile, variabilityUnit)–
+                                                @DurationFormatter.Format(variability.ThirdQuartile, variabilityUnit)</span>
+                                            <span>relative IQR @FormatPercent(RelativeIqr(variability))</span>
+                                            <span>n=@variability.SampleCount</span>
+                                        </div>
+                                    }
+                                }
+                                <dl>
+                                    <div>
+                                        <dt>runtime</dt>
+                                        <dd><code title="@point.Observation.RuntimeSha" aria-label="runtime SHA @point.Observation.RuntimeSha">@ShortSha(point.Observation.RuntimeSha)</code></dd>
+                                    </div>
+                                    <div>
+                                        <dt>performance</dt>
+                                        <dd><code title="@point.Observation.PerformanceSha" aria-label="performance repository SHA @point.Observation.PerformanceSha">@ShortSha(point.Observation.PerformanceSha)</code></dd>
+                                    </div>
+                                    <div>
+                                        <dt>trace/build</dt>
+                                        <dd title="@point.Observation.TraceName">@(point.Observation.TraceName ?? "not reported")</dd>
+                                    </div>
+                                    <div>
+                                        <dt>source</dt>
+                                        <dd>@(point.Observation.Source == ObservationSource.DirectSnapshot
+                                            ? $"{point.Observation.SourceLabel ?? "Direct snapshot"} fallback · build {point.Observation.BuildId}" +
+                                                (point.Observation.Partition is null ? "" : $" · {point.Observation.Partition}")
+                                            : "Published allTestHistory")</dd>
+                                    </div>
+                                    @if (point.Observation.Samples is { Count: > 0 } samples)
+                                    {
+                                        <div>
+                                            <dt>samples</dt>
+                                            <dd>@samples.Count raw values retained</dd>
+                                        </div>
+                                    }
+                                </dl>
+                                @if (_selectionState.IsPinned)
+                                {
+                                    <div class="pin-actions" aria-label="Regression investigation pins">
+                                        <button type="button"
+                                                class="pin-a"
+                                                disabled="@(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity)"
+                                                @onclick="() => RequestPinAsync(InvestigationPinSlot.BaselineA, point)">
+                                            @(BaselinePin?.RunId == point.History.Run.Id && BaselinePin.Identity == identity ? "Pinned as A" : "Set baseline A")
+                                        </button>
+                                        <button type="button"
+                                                class="pin-b"
+                                                disabled="@(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity)"
+                                                @onclick="() => RequestPinAsync(InvestigationPinSlot.ComparisonB, point)">
+                                            @(ComparisonPin?.RunId == point.History.Run.Id && ComparisonPin.Identity == identity ? "Pinned as B" : "Set comparison B")
+                                        </button>
+                                    </div>
+                                }
+                            </section>
+                        }
+                    </div>
+                </aside>
+            }
+        </div>
+
+        @if (InvestigationGuidance is not null)
+        {
+            <div class="investigation-guidance" role="status" aria-live="polite">
+                @InvestigationGuidance
+            </div>
+        }
+
+        <div class="chart-caption">
+            <span>@(Normalized ? "Ratio to the first selected run on strict matches" : "Raw reported primary-trace values")</span>
+            <span id="chart-hover-instructions">
+                Hover or use ←/→, Home, End to preview · click/tap or press Enter/Space to pin · Escape to unpin
+            </span>
+        </div>
+
+        @if (ShowVariabilityBand)
+        {
+            <VariabilityAnalysisPanels Histories="Histories"
+                                       Matches="Matches"
+                                       Normalized="Normalized"
+                                       TimeRange="TimeRange"
+                                       Window="VariabilityWindow"
+                                       PinnedTimestamp="_selectionState.PinnedTimestamp"
+                                       FocusedRunId="_seriesFocus.FocusedRunId" />
+        }
+    }
+</div>
+
+@code {
+    private const double PlotLeft = 86;
+    private const double PlotTop = 24;
+    private const double PlotWidth = 884;
+    private const double PlotHeight = 340;
+
+    private static readonly IReadOnlyList<RangeOption> RangeOptions =
+    [
+        new("30d", HistoryTimeRange.ThirtyDays),
+        new("90d", HistoryTimeRange.NinetyDays),
+        new("1y", HistoryTimeRange.OneYear),
+        new("All", HistoryTimeRange.All)
+    ];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<BenchmarkHistory> Histories { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<MatchedComparison> Matches { get; set; } = [];
+
+    [Parameter]
+    public bool Normalized { get; set; }
+
+    [Parameter]
+    public HistoryTimeRange TimeRange { get; set; } = HistoryTimeRange.All;
+
+    [Parameter]
+    public EventCallback<HistoryTimeRange> TimeRangeChanged { get; set; }
+
+    [Parameter]
+    public bool ShowVariabilityBand { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> ShowVariabilityBandChanged { get; set; }
+
+    [Parameter]
+    public int VariabilityWindow { get; set; } =
+        RollingVariabilityCalculator.DefaultWindow;
+
+    [Parameter]
+    public EventCallback<int> VariabilityWindowChanged { get; set; }
+
+    [Parameter]
+    public InvestigationPin? BaselinePin { get; set; }
+
+    [Parameter]
+    public InvestigationPin? ComparisonPin { get; set; }
+
+    [Parameter]
+    public EventCallback<InvestigationPinRequest> PinRequested { get; set; }
+
+    private ElementReference _chartElement;
+    private ElementReference _scrubberElement;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _dragHandle;
+    private DotNetObjectReference<HistoryChart>? _selfReference;
+    private IReadOnlyList<BenchmarkHistory> _visibleHistories = [];
+    private IReadOnlyList<MatchedComparison> _visibleMatches = [];
+    private IReadOnlyList<ChartSeries> _series = [];
+    private IReadOnlyList<HitRegion> _hitRegions = [];
+    private ChartHoverIndex _hoverIndex = new([], [], false);
+    private readonly ChartSelectionState _selectionState = new();
+    private readonly ChartSeriesFocusState _seriesFocus = new();
+    private ChartHoverSelection? _hover;
+    private long _minTicks;
+    private long _maxTicks;
+    private double _minY;
+    private double _maxY;
+    private DateTime _availableMinimum;
+    private DateTime _availableMaximum;
+    private DateTime _visibleStart;
+    private DateTime _visibleEnd;
+    private bool _hasKeyboardFocus;
+    private bool _pointerInside;
+    private bool _needsDragInitialization;
+    private string? _selectionScope;
+
+    private IReadOnlyList<ChartSeries> Series => _series;
+    private int DirectCount => Histories.Sum(history =>
+        history.Observations.Count(observation => observation.Source == ObservationSource.DirectSnapshot));
+
+    private IEnumerable<PinMarker> VisiblePinMarkers
+    {
+        get
+        {
+            if (BaselinePin is not null && IsVisible(BaselinePin.Identity.Timestamp))
+            {
+                yield return new PinMarker(
+                    InvestigationPinSlot.BaselineA,
+                    BaselinePin,
+                    "pin-a");
+            }
+
+            if (ComparisonPin is not null && IsVisible(ComparisonPin.Identity.Timestamp))
+            {
+                yield return new PinMarker(
+                    InvestigationPinSlot.ComparisonB,
+                    ComparisonPin,
+                    "pin-b");
+            }
+        }
+    }
+
+    private double _hoverCardPercent =>
+        _hover is null
+            ? 0
+            : ScaleX(_hover.Timestamp.Ticks) / 1000d * 100d;
+
+    private string KeyboardValueText =>
+        (_hover?.Timestamp ?? _hoverIndex.Timestamps.LastOrDefault())
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private string? InvestigationGuidance =>
+        (BaselinePin, ComparisonPin) switch
+        {
+            (not null, null) =>
+                "Baseline A set — select and pin another timestamp, then choose Set comparison B.",
+            (null, not null) =>
+                "Comparison B set — select and pin another timestamp, then choose Set baseline A.",
+            (not null, not null) =>
+                "Baseline A and comparison B are set — the comparison is shown below. Pin another timestamp to replace either point.",
+            _ => null
+        };
+
+    protected override void OnParametersSet()
+    {
+        var allTimestamps = Histories
+            .SelectMany(history => history.Observations)
+            .Select(observation => observation.Timestamp)
+            .ToArray();
+        if (allTimestamps.Length == 0)
+        {
+            _visibleHistories = [];
+            _visibleMatches = [];
+            _series = [];
+            _hoverIndex = new([], [], Normalized);
+            _selectionState.Reset();
+            _seriesFocus.ShowAll();
+            _hover = null;
+            return;
+        }
+
+        _availableMinimum = allTimestamps.Min();
+        _availableMaximum = allTimestamps.Max();
+        var visibleRange = TimeRange.Resolve(_availableMinimum, _availableMaximum);
+        _visibleStart = visibleRange.Start;
+        _visibleEnd = visibleRange.End;
+        _visibleHistories = Histories
+            .Select(history => history with
+            {
+                Observations = history.Observations
+                    .Where(observation =>
+                        observation.Timestamp >= visibleRange.Start
+                        && observation.Timestamp <= visibleRange.End)
+                    .ToArray()
+            })
+            .ToArray();
+        _visibleMatches = Matches
+            .Where(match =>
+                match.Key.Timestamp >= visibleRange.Start
+                && match.Key.Timestamp <= visibleRange.End)
+            .ToArray();
+        _hoverIndex = new ChartHoverIndex(_visibleHistories, _visibleMatches, Normalized);
+        var selectionScope = string.Join(
+            '|',
+            _visibleHistories.Select(history => $"{history.Benchmark}:{history.Run.Id}"));
+        if (!string.Equals(_selectionScope, selectionScope, StringComparison.Ordinal))
+        {
+            _selectionState.Reset();
+            _selectionScope = selectionScope;
+        }
+
+        _selectionState.Reconcile(_hoverIndex.Timestamps);
+        RefreshDisplayedSelection();
+        _series = BuildSeries();
+        _seriesFocus.Reconcile(_series.Select(series => series.History.Run.Id));
+        if (_series.Count == 0)
+        {
+            return;
+        }
+
+        var points = _series.SelectMany(series => series.Points).ToArray();
+        _minTicks = points.Min(point => point.Timestamp.Ticks);
+        _maxTicks = points.Max(point => point.Timestamp.Ticks);
+        if (_maxTicks == _minTicks)
+        {
+            _maxTicks += TimeSpan.TicksPerDay;
+        }
+
+        var rawMin = points.Min(point => point.Value);
+        var rawMax = points.Max(point => point.Value);
+        var padding = rawMax == rawMin
+            ? Math.Max(Math.Abs(rawMin) * .05, .05)
+            : (rawMax - rawMin) * .08;
+        _minY = rawMin - padding;
+        _maxY = rawMax + padding;
+        _hitRegions = BuildHitRegions();
+        _needsDragInitialization = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_needsDragInitialization || Series.Count == 0)
+        {
+            return;
+        }
+
+        _needsDragInitialization = false;
+        _module ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import",
+            "./Components/HistoryChart.razor.js");
+        if (_dragHandle is not null)
+        {
+            await _dragHandle.InvokeVoidAsync("dispose");
+            await _dragHandle.DisposeAsync();
+        }
+
+        _selfReference ??= DotNetObjectReference.Create(this);
+        _dragHandle = await _module.InvokeAsync<IJSObjectReference>(
+            "initializeRangeDrag",
+            _chartElement,
+            _scrubberElement,
+            _selfReference,
+            PlotLeft,
+            PlotWidth);
+    }
+
+    [JSInvokable]
+    public async Task CompleteRangeDrag(double startRatio, double endRatio)
+    {
+        var start = Math.Clamp(Math.Min(startRatio, endRatio), 0, 1);
+        var end = Math.Clamp(Math.Max(startRatio, endRatio), 0, 1);
+        if (end - start < .005)
+        {
+            return;
+        }
+
+        var startTicks = MinTicks + (long)((MaxTicks - MinTicks) * start);
+        var endTicks = MinTicks + (long)((MaxTicks - MinTicks) * end);
+        await ChangeRangeAsync(HistoryTimeRange.Custom(
+            new DateTime(startTicks, DateTimeKind.Unspecified),
+            new DateTime(endTicks, DateTimeKind.Unspecified)));
+    }
+
+    [JSInvokable]
+    public Task PinAtRatio(double ratio)
+    {
+        if (_hoverIndex.Timestamps.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var targetTicks = MinTicks
+            + (long)((MaxTicks - MinTicks) * Math.Clamp(ratio, 0, 1));
+        var selection = _hoverIndex.SelectNearest(
+            new DateTime(targetTicks, DateTimeKind.Unspecified));
+        if (selection is not null)
+        {
+            _selectionState.Pin(selection.Timestamp);
+            RefreshDisplayedSelection();
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task TogglePinnedSelection()
+    {
+        _selectionState.TogglePin();
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task UnpinSelection()
+    {
+        _selectionState.Unpin(clearTarget: false);
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private IReadOnlyList<ChartSeries> BuildSeries()
+    {
+        if (!Normalized)
+        {
+            return Histories
+                .Select(history => CreateSeries(
+                    history,
+                    history.Observations
+                        .Select(observation => new ChartPoint(
+                            observation.Timestamp,
+                            observation.Value,
+                            observation.Source))
+                        .ToArray()))
+                .Where(series => series.Points.Count > 0)
+                .ToArray();
+        }
+
+        if (_visibleHistories.Count == 0)
+        {
+            return [];
+        }
+
+        var baselineId = _visibleHistories[0].Run.Id;
+        return Histories
+            .Select(history => CreateSeries(
+                history,
+                Matches
+                    .Where(match => match.Observations[baselineId].Value != 0)
+                    .Select(match =>
+                    {
+                        var observation = match.Observations[history.Run.Id];
+                        var baseline = match.Observations[baselineId];
+                        return new ChartPoint(
+                            observation.Timestamp,
+                            observation.Value / baseline.Value,
+                            observation.Source);
+                    }).ToArray()))
+            .Where(series => series.Points.Count > 0)
+            .ToArray();
+    }
+
+    private ChartSeries CreateSeries(
+        BenchmarkHistory history,
+        IReadOnlyList<ChartPoint> points)
+    {
+        var orderedPoints = points
+            .OrderBy(point => point.Timestamp)
+            .ToArray();
+        var visiblePoints = orderedPoints
+            .Where(point =>
+                point.Timestamp >= _visibleStart
+                && point.Timestamp <= _visibleEnd)
+            .ToArray();
+        IReadOnlyList<VariabilityBandPoint> band = ShowVariabilityBand
+            ? RollingVariabilityCalculator.Calculate(
+                orderedPoints.Select(point => new VariabilitySample(
+                    point.Timestamp,
+                    point.Value)),
+                VariabilityWindow)
+                .Where(point =>
+                    point.Timestamp >= _visibleStart
+                    && point.Timestamp <= _visibleEnd)
+                .ToArray()
+            : [];
+        return new ChartSeries(history, visiblePoints, band);
+    }
+
+    private long MinTicks => _minTicks;
+
+    private long MaxTicks => _maxTicks;
+
+    private double MinY => _minY;
+
+    private double MaxY => _maxY;
+
+    private bool IsVisible(DateTime timestamp) =>
+        timestamp.Ticks >= MinTicks && timestamp.Ticks <= MaxTicks;
+
+    private double ScaleX(long ticks) =>
+        PlotLeft + (ticks - MinTicks) / (double)(MaxTicks - MinTicks) * PlotWidth;
+
+    private double ScaleY(double value) =>
+        PlotTop + (MaxY - value) / (MaxY - MinY) * PlotHeight;
+
+    private string Polyline(IReadOnlyList<ChartPoint> points) =>
+        string.Join(
+            " ",
+            points.Select(point => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Value):0.##}")));
+
+    private IReadOnlyList<IReadOnlyList<ChartPoint>> PointSegments(
+        IReadOnlyList<ChartPoint> points) =>
+        TimeSeriesSegmenter.SplitAtLongGaps(points, point => point.Timestamp);
+
+    private IReadOnlyList<IReadOnlyList<ChartPoint>> PublishedPointSegments(
+        IReadOnlyList<ChartPoint> points) =>
+        PointSegments(points
+            .Where(point => point.Source == ObservationSource.PublishedHistory)
+            .ToArray())
+            .Where(segment => segment.Count >= 2)
+            .ToArray();
+
+    private IReadOnlyList<string> DirectConnectorPaths(
+        IReadOnlyList<ChartPoint> points) =>
+        DirectSeriesPresentation.BuildConnectorPaths(
+            points
+                .Where(point => point.Source == ObservationSource.DirectSnapshot)
+                .ToArray(),
+            point => point.Timestamp,
+            point => ChartPointCoordinates(point));
+
+    private string ChartPointCoordinates(ChartPoint point) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{ScaleX(point.Timestamp.Ticks):0.##},{ScaleY(point.Value):0.##}");
+
+    private VariabilityBandPoint? FindVariabilityPoint(
+        string runId,
+        DateTime timestamp) =>
+        Series.FirstOrDefault(series => series.History.Run.Id == runId)
+            ?.Band.MinBy(point => Math.Abs((point.Timestamp - timestamp).Ticks));
+
+    private static double RelativeIqr(VariabilityBandPoint point) =>
+        point.Median == 0
+            ? double.NaN
+            : 100 * point.InterquartileRange / Math.Abs(point.Median);
+
+    private static IEnumerable<ChartPoint> DisplayPoints(IReadOnlyList<ChartPoint> points)
+    {
+        var published = points
+            .Where(point => point.Source == ObservationSource.PublishedHistory)
+            .ToArray();
+        var step = Math.Max(1, (int)Math.Ceiling(published.Length / 100d));
+        var displayed = new List<ChartPoint>();
+        for (var index = 0; index < published.Length; index += step)
+        {
+            displayed.Add(published[index]);
+        }
+
+        if (published.Length > 1 && (published.Length - 1) % step != 0)
+        {
+            displayed.Add(published[^1]);
+        }
+
+        displayed.AddRange(points.Where(
+            point => point.Source == ObservationSource.DirectSnapshot));
+        return displayed.OrderBy(point => point.Timestamp);
+    }
+
+    private DirectMarkerPresentation DirectMarker(
+        ChartSeries series,
+        ChartPoint point) =>
+        DirectSeriesPresentation.CreateMarker(
+            series.History.Run.DisplayName,
+            point.Timestamp,
+            Normalized
+                ? point.Value.ToString("0.000×", CultureInfo.InvariantCulture)
+                : DurationFormatter.FormatExactNanoseconds(point.Value));
+
+    private void ToggleSeriesFocus(string runId) => _seriesFocus.Toggle(runId);
+
+    private void ShowAllSeries() => _seriesFocus.ShowAll();
+
+    private string SeriesFocusClass(string runId) =>
+        _seriesFocus.IsFocused(runId)
+            ? "is-focused"
+            : _seriesFocus.IsDimmed(runId)
+                ? "is-dimmed"
+                : "";
+
+    private string LegendFocusLabel(ChartSeries series) =>
+        _seriesFocus.IsFocused(series.History.Run.Id)
+            ? $"Show all series; {series.History.Run.DisplayName} is focused"
+            : $"Focus {series.History.Run.DisplayName}";
+
+    private string SeriesFocusStatus =>
+        _seriesFocus.FocusedRunId is null
+            ? "All chart series shown"
+            : $"{Series.First(series => series.History.Run.Id == _seriesFocus.FocusedRunId).History.Run.DisplayName} focused; other series dimmed";
+
+    private IReadOnlyList<HitRegion> BuildHitRegions()
+    {
+        if (_hoverIndex.Timestamps.Count == 0)
+        {
+            return [];
+        }
+
+        var centers = _hoverIndex.Timestamps
+            .Select(timestamp => ScaleX(timestamp.Ticks))
+            .ToArray();
+        var regions = new HitRegion[centers.Length];
+        for (var index = 0; index < centers.Length; index++)
+        {
+            var left = index == 0
+                ? PlotLeft
+                : (centers[index - 1] + centers[index]) / 2d;
+            var right = index == centers.Length - 1
+                ? PlotLeft + PlotWidth
+                : (centers[index] + centers[index + 1]) / 2d;
+            regions[index] = new HitRegion(index, left, Math.Max(.25, right - left));
+        }
+
+        return regions;
+    }
+
+    private void HoverTimeline(int timelineIndex)
+    {
+        _pointerInside = true;
+        var selection = _hoverIndex.SelectAt(timelineIndex);
+        if (selection is null)
+        {
+            return;
+        }
+
+        _selectionState.Hover(selection.Timestamp);
+        RefreshDisplayedSelection();
+    }
+
+    private void OnChartPointerLeave()
+    {
+        _pointerInside = false;
+        _selectionState.Leave(_hasKeyboardFocus);
+        RefreshDisplayedSelection();
+    }
+
+    private void OnScrubberFocus()
+    {
+        _hasKeyboardFocus = true;
+        if (_selectionState.DisplayTimestamp is null
+            && _hoverIndex.Timestamps.Count > 0)
+        {
+            _selectionState.Scrub(_hoverIndex.Timestamps[^1]);
+            RefreshDisplayedSelection();
+        }
+    }
+
+    private void OnScrubberBlur()
+    {
+        _hasKeyboardFocus = false;
+        _selectionState.Leave(_pointerInside);
+        RefreshDisplayedSelection();
+    }
+
+    private void OnScrubberInput(ChangeEventArgs eventArgs)
+    {
+        if (_hoverIndex.Timestamps.Count == 0
+            || !int.TryParse(
+                eventArgs.Value?.ToString(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var timelineIndex))
+        {
+            return;
+        }
+
+        var selection = _hoverIndex.SelectAt(timelineIndex);
+        if (selection is not null)
+        {
+            _selectionState.Scrub(selection.Timestamp);
+            RefreshDisplayedSelection();
+        }
+    }
+
+    private void OnPlotKeyDown(KeyboardEventArgs eventArgs)
+    {
+        if (eventArgs.Key == "Escape" && _selectionState.IsPinned)
+        {
+            _selectionState.Unpin(clearTarget: false);
+            RefreshDisplayedSelection();
+        }
+    }
+
+    private void ClearPinnedSelection()
+    {
+        _selectionState.Unpin(clearTarget: true);
+        RefreshDisplayedSelection();
+    }
+
+    private void RefreshDisplayedSelection()
+    {
+        _hover = _selectionState.DisplayTimestamp is null
+            ? null
+            : _hoverIndex.SelectNearest(_selectionState.DisplayTimestamp.Value);
+    }
+
+    private async Task RequestPinAsync(
+        InvestigationPinSlot slot,
+        ChartHoverPoint point)
+    {
+        await PinRequested.InvokeAsync(new InvestigationPinRequest(
+            slot,
+            new InvestigationPin(
+                point.History.Run.Id,
+                ObservationIdentity.From(point.Observation))));
+        _selectionState.Unpin(clearTarget: true);
+        RefreshDisplayedSelection();
+        StateHasChanged();
+        await Task.Yield();
+        await _scrubberElement.FocusAsync(preventScroll: true);
+    }
+
+    private async Task ChangeRangeAsync(HistoryTimeRange range)
+    {
+        _hover = null;
+        await TimeRangeChanged.InvokeAsync(range);
+    }
+
+    private Task ResetRangeAsync() => ChangeRangeAsync(HistoryTimeRange.All);
+
+    private Task OnVariabilityBandChanged(ChangeEventArgs eventArgs) =>
+        ShowVariabilityBandChanged.InvokeAsync(eventArgs.Value is true);
+
+    private Task OnVariabilityWindowChanged(ChangeEventArgs eventArgs)
+    {
+        if (int.TryParse(
+                eventArgs.Value?.ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var window)
+            && RollingVariabilityCalculator.IsSupportedWindow(window))
+        {
+            return VariabilityWindowChanged.InvokeAsync(window);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private string FormatAxisValue(double value) =>
+        Normalized
+            ? value.ToString("0.000×", CultureInfo.InvariantCulture)
+            : DurationFormatter.Format(value, DurationFormatter.SelectUnit(MinY, MaxY));
+
+    private static string FormatDate(long ticks) =>
+        new DateTime(ticks, DateTimeKind.Unspecified).ToString("MMM d\nyyyy", CultureInfo.InvariantCulture);
+
+    private static string ShortSha(string sha) => sha.Length <= 10 ? sha : sha[..10];
+
+    private static string FormatPercent(double value) =>
+        double.IsFinite(value)
+            ? value.ToString("0.##", CultureInfo.InvariantCulture) + "%"
+            : "—";
+
+    private static string DirectSuffix(BenchmarkHistory history)
+    {
+        var count = history.Observations.Count(
+            observation => observation.Source == ObservationSource.DirectSnapshot);
+        return count == 0 ? "" : $" · {count:N0} fallback";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_dragHandle is not null)
+            {
+                await _dragHandle.InvokeVoidAsync("dispose");
+                await _dragHandle.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
+        _selfReference?.Dispose();
+    }
+
+    private sealed record RangeOption(string Label, HistoryTimeRange Range);
+
+    private sealed record ChartPoint(DateTime Timestamp, double Value, ObservationSource Source);
+
+    private sealed record HitRegion(int TimelineIndex, double X, double Width);
+
+    private sealed record ChartSeries(
+        BenchmarkHistory History,
+        IReadOnlyList<ChartPoint> Points,
+        IReadOnlyList<VariabilityBandPoint> Band)
+    {
+        public bool HasDirectSnapshots =>
+            Points.Any(point => point.Source == ObservationSource.DirectSnapshot);
+
+        public bool IsDirectOnly =>
+            Points.Count > 0
+            && Points.All(point => point.Source == ObservationSource.DirectSnapshot);
+    }
+
+    private sealed record PinMarker(
+        InvestigationPinSlot Slot,
+        InvestigationPin Pin,
+        string CssClass);
+}
