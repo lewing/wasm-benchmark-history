@@ -816,7 +816,7 @@ else
 
         private void UpdateUrl()
         {
-            var target = "/";
+            var target = string.Empty;
             if (_selectedBenchmark is not null)
             {
                 var runIds = KnownRunConfigurations.All
@@ -834,7 +834,7 @@ else
                     _useRobustSummary,
                     _showVariabilityBand,
                     _variabilityWindow);
-                target = HistoryPageStateCodec.ToRelativeUri(state);
+                target = HistoryPageStateCodec.ToRelativeUri(state).TrimStart('/');
             }
 
             if (!_isInteractive)

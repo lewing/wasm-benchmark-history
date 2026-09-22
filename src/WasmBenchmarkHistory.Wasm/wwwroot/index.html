@@ -10,6 +10,14 @@
     <link rel="stylesheet" href="css/app.css" />
     <link href="WasmBenchmarkHistory.Wasm.styles.css" rel="stylesheet" />
     <script type="importmap"></script>
+    <script>
+        // Restore paths redirected through 404.html before Blazor reads the current location.
+        var redirect = new URLSearchParams(location.search).get('redirect');
+        if (redirect) {
+            var basePath = document.querySelector('base').getAttribute('href');
+            history.replaceState(null, '', basePath + redirect);
+        }
+    </script>
 </head>
 
 <body>
