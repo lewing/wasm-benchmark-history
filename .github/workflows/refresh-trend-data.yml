@@ -1,0 +1,44 @@
+name: Refresh Trends static data
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Rebuild TrendData and commit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 11.0.x
+          dotnet-quality: preview
+
+      - name: Restore
+        run: dotnet restore src/WasmBenchmarkHistory.TrendBuilder/WasmBenchmarkHistory.TrendBuilder.csproj --nologo
+
+      - name: Run TrendBuilder
+        run: |
+          dotnet run --project src/WasmBenchmarkHistory.TrendBuilder --configuration Release --no-restore -- \
+            src/WasmBenchmarkHistory.Wasm/wwwroot/TrendData
+
+      - name: Commit refreshed TrendData
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/WasmBenchmarkHistory.Wasm/wwwroot/TrendData
+          if git diff --cached --quiet; then
+            echo "No TrendData changes to commit."
+            exit 0
+          fi
+          git commit -m "Refresh Trends static data"
+          git push
