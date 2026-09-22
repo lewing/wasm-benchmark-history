@@ -3,6 +3,7 @@
     <Project Path="src/WasmBenchmarkHistory/WasmBenchmarkHistory.csproj" />
     <Project Path="src/WasmBenchmarkHistory.Core/WasmBenchmarkHistory.Core.csproj" />
     <Project Path="src/WasmBenchmarkHistory.Wasm/WasmBenchmarkHistory.Wasm.csproj" />
+    <Project Path="src/WasmBenchmarkHistory.TrendBuilder/WasmBenchmarkHistory.TrendBuilder.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WasmBenchmarkHistory.Tests/WasmBenchmarkHistory.Tests.csproj" />

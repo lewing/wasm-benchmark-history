@@ -7,7 +7,7 @@ public sealed class BenchmarkHistoryService(
     BenchmarkIndexParser indexParser,
     BenchmarkHistoryParser historyParser,
     IOptions<BenchmarkDataOptions> options,
-    IEnumerable<IBenchmarkHistoryProvider>? historyProviders = null)
+    IEnumerable<IBenchmarkHistoryProvider>? historyProviders = null) : IBenchmarkHistoryOrchestrator
 {
     private readonly BenchmarkDataOptions _options = options.Value;
     private readonly IBenchmarkHistoryProvider[] _historyProviders =
