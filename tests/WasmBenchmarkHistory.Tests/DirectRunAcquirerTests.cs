@@ -157,7 +157,7 @@ public sealed class DirectRunAcquirerTests
     public void BuildSelector_OrdersNumericBuildIdsNewestFirst()
     {
         Assert.Equal(["3074629", "3074425", "3068640"],
-            BuildSnapshotStore.OrderBuildIds(["3068640", "local", "3074425", "3074629"]));
+            BuildSnapshotStoreOrdering.OrderBuildIds(["3068640", "local", "3074425", "3074629"]));
     }
 
     private static BuildSnapshot Snapshot()

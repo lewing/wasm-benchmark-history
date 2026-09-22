@@ -172,7 +172,12 @@ public static class BuildSnapshotImporter
     public static async Task<BuildSnapshot> ReadAsync(string path)
     {
         await using var file = File.OpenRead(path);
-        await using var gzip = new GZipStream(file, CompressionMode.Decompress);
+        return await ReadAsync(file);
+    }
+
+    public static async Task<BuildSnapshot> ReadAsync(Stream stream)
+    {
+        await using var gzip = new GZipStream(stream, CompressionMode.Decompress);
         var snapshot = await JsonSerializer.DeserializeAsync<BuildSnapshot>(gzip, JsonOptions)
             ?? throw new InvalidDataException("Empty build snapshot.");
         BuildComparison.Validate(snapshot);
