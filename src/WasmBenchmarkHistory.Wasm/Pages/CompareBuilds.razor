@@ -1,4 +1,4 @@
-@page "/"
+@page "/compare-builds"
 @inject IBuildSnapshotStore Store
 @inject IDirectHistoryArchiveSource DirectHistory
 
@@ -8,8 +8,8 @@
     <p class="eyebrow">SAME-BUILD MEASUREMENTS</p>
     <h1>Four Wasm runtime modes</h1>
     <p>Compare Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R.
-        Snapshot-to-snapshot calculations stay within one build. This standalone view mirrors the
-        "Compare Builds" page of the full history dashboard; earlier ColdStart runs are never mixed in.</p>
+        Snapshot-to-snapshot calculations stay within one build. The same exact observations
+        can also augment <a href="/">historical trends</a>; earlier ColdStart runs are never mixed in.</p>
 </section>
 
 <label for="build-select">Build</label>

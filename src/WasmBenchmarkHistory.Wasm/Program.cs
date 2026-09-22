@@ -21,5 +21,9 @@ builder.Services.AddScoped<IBenchmarkHistoryProvider>(
     services => services.GetRequiredService<WasmDirectHistoryProvider>());
 builder.Services.AddScoped<IDirectHistoryArchiveSource>(
     services => services.GetRequiredService<WasmDirectHistoryProvider>());
+builder.Services.AddScoped<WasmTrendHistoryProvider>();
+builder.Services.AddScoped<IBenchmarkHistoryProvider>(
+    services => services.GetRequiredService<WasmTrendHistoryProvider>());
+builder.Services.AddScoped<IBenchmarkHistoryOrchestrator, PrebuiltBenchmarkHistoryOrchestrator>();
 
 await builder.Build().RunAsync();

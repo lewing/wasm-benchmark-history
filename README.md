@@ -267,6 +267,29 @@ via manual dispatch). It rewrites `<base href="/">` to the repository's Pages
 path automatically, so no manual configuration is needed beyond enabling
 Pages with the "GitHub Actions" source in the repository settings.
 
+The app also includes a standalone **Trends** page (`/`) mirroring the
+server's historical-trends dashboard. The server's trend charts fetch live
+report pages from an internal, CORS-restricted host, which a browser cannot
+reach directly, so the WASM app instead reads pre-generated static JSON
+committed under `src/WasmBenchmarkHistory.Wasm/wwwroot/TrendData/`. This data
+is produced offline by `WasmBenchmarkHistory.TrendBuilder`, a console tool
+that reuses the same parsers as the server (`WasmBenchmarkHistory.Core`) to
+fetch and compact each curated benchmark's history into one gzip JSON file
+per benchmark/run:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory.TrendBuilder -- \
+  src/WasmBenchmarkHistory.Wasm/wwwroot/TrendData
+```
+
+`.github/workflows/refresh-trend-data.yml` runs this tool weekly (and on
+manual dispatch) and commits any changes, which then flow into the next Pages
+deploy. The curated set currently covers ~20 benchmarks (one per top-level
+category) to validate the pipeline; both providers (bundled direct snapshots
+and prebuilt trend data) are merged through the shared
+`IBenchmarkHistoryOrchestrator` abstraction, the same pattern used for
+`IBuildSnapshotStore` on the Compare Builds page.
+
 ### Included snapshots
 
 #### Build 3074629

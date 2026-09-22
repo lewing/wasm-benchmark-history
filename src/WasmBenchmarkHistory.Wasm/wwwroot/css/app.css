@@ -61,3 +61,23 @@ a:focus-visible {
     color: white;
     padding: 1rem;
 }
+
+#blazor-error-ui {
+    background: #ffdf8b;
+    bottom: 0;
+    box-shadow: 0 -1px 8px rgb(0 0 0 / 20%);
+    box-sizing: border-box;
+    color: #211700;
+    display: none;
+    left: 0;
+    padding: .8rem 3rem .8rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 1rem;
+}

@@ -102,6 +102,8 @@ builder.Services.AddHttpClient<CachedPageClient>((services, client) =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("wasm-benchmark-history/1.0");
 });
 builder.Services.AddScoped<BenchmarkHistoryService>();
+builder.Services.AddScoped<IBenchmarkHistoryOrchestrator>(
+    services => services.GetRequiredService<BenchmarkHistoryService>());
 builder.Services.AddHttpClient<PerfAutofilingIssueClient>((services, client) =>
 {
     var options = services.GetRequiredService<
