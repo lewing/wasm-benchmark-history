@@ -16,6 +16,11 @@
     <ProjectReference Include="..\WasmBenchmarkHistory.Core\WasmBenchmarkHistory.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor" Link="Pages\SlowdownRanking.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor.css" Link="Pages\SlowdownRanking.razor.css" />
+  </ItemGroup>
+
   <!--
     Same bundled build snapshots the server app ships (single source of truth, linked rather
     than copied) so the standalone WASM app can fetch them over HTTP instead of the filesystem.
