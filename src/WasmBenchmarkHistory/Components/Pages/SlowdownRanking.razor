@@ -1,0 +1,357 @@
+@page "/slowdown-ranking"
+@using System.ComponentModel.DataAnnotations
+@inject IBuildSnapshotStore Store
+
+<PageTitle>Slowdown ranking</PageTitle>
+
+<div class="ranking-page">
+    <header class="ranking-heading">
+        <div>
+            <p class="eyebrow">SAME-BUILD COMPARISON</p>
+            <h1>Slowdown ranking</h1>
+            <p>Rank microbenchmarks by percentage slowdown between two configurations.</p>
+        </div>
+    </header>
+
+    <div class="ranking-workspace">
+        <section class="query-panel" aria-label="Ranking options">
+            <EditForm Model="_query" OnValidSubmit="CompareAsync" FormName="slowdown-ranking">
+                <DataAnnotationsValidator />
+                <div class="query-fields">
+                    <div class="form-field build-field">
+                        <label for="ranking-build">Build snapshot</label>
+                        <InputSelect id="ranking-build" @bind-Value="_query.BuildId" disabled="@_busy">
+                            @foreach (var build in _builds)
+                            {
+                                <option value="@build.BuildId">@build.BuildId / @build.BuildNumber</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="form-field">
+                        <label for="ranking-candidate">Measured configuration</label>
+                        <InputSelect id="ranking-candidate" @bind-Value="_query.CandidateId" disabled="@_busy">
+                            @foreach (var lane in BuildComparison.LaneIds)
+                            {
+                                <option value="@lane">@LaneName(lane)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="form-field">
+                        <label for="ranking-baseline">Reference configuration</label>
+                        <InputSelect id="ranking-baseline" @bind-Value="_query.BaselineId" disabled="@_busy">
+                            @foreach (var lane in BuildComparison.LaneIds)
+                            {
+                                <option value="@lane">@LaneName(lane)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="form-field count-field">
+                        <label for="ranking-count">Show top</label>
+                        <InputNumber id="ranking-count" @bind-Value="_query.Limit" min="1" step="1" disabled="@_busy" />
+                    </div>
+                    <button class="rank-button" type="submit" disabled="@(_busy || _builds.Length == 0)">
+                        @(_busy ? "Loading snapshot..." : "Rank benchmarks")
+                    </button>
+                </div>
+                <ValidationSummary />
+            </EditForm>
+            <div class="benchmark-filter">
+                <label for="ranking-filter">Filter microbenchmarks</label>
+                <div class="filter-input">
+                    <input id="ranking-filter" type="search" @bind="_filter" @bind:event="oninput"
+                           @bind:after="ApplyFilter" placeholder="e.g. json"
+                           autocomplete="off" aria-describedby="ranking-filter-help" disabled="@_busy" />
+                    @if (_filter.Length > 0)
+                    {
+                        <button type="button" @onclick="ClearFilter" disabled="@_busy">Clear filter</button>
+                    }
+                </div>
+                <p id="ranking-filter-help">Filters names, parameters, and categories as you type, before applying the result limit.</p>
+            </div>
+        </section>
+
+        <div class="ranking-results" aria-busy="@(_busy ? "true" : "false")">
+            @if (_error is not null)
+            {
+                <div class="error-panel" role="alert">@_error</div>
+            }
+            @if (_busy)
+            {
+                <p class="empty-panel" role="status">Loading benchmark measurements...</p>
+            }
+            else if (_ranking is { } ranking && _comparison is { } comparison)
+            {
+                <div class="result-heading">
+                    <div>
+                        <h2>@LaneName(_candidate) <span>vs</span> @LaneName(_baseline)</h2>
+                        <p>Build @comparison.Snapshot.Build.BuildId / @comparison.Snapshot.Build.SourceDate</p>
+                    </div>
+                    <span class="result-count" role="status">Showing @ranking.Rows.Length of @ranking.SlowerCount.ToString("N0")
+                        @(HasFilter ? "matching slower benchmarks" : "slower benchmarks")</span>
+                </div>
+
+                <div class="summary-cards">
+                    <div><span>@(HasFilter ? "Matching benchmarks compared" : "Benchmarks compared")</span><strong>@ranking.ComparableCount.ToString("N0")</strong>
+                        <small>Valid results in this pair</small></div>
+                    <div><span>Slower on @LaneName(_candidate)</span><strong>@ranking.SlowerCount.ToString("N0")</strong>
+                        <small>@((ranking.ComparableCount - ranking.SlowerCount).ToString("N0")) faster or equal</small></div>
+                    <div class="largest"><span>Largest slowdown</span>
+                        <strong title="@(ranking.Rows.Length == 0 ? null : Percent(ranking.Rows[0].SlowdownPercent))">@(ranking.Rows.Length > 0
+                            ? CompactPercent(ranking.Rows[0].SlowdownPercent) : ranking.ComparableCount > 0 ? "None" : "N/A")</strong>
+                        <small>Relative to @LaneName(_baseline)</small></div>
+                </div>
+                <p class="coverage-note">@ranking.ExcludedCount.ToString("N0") @(HasFilter ? "matching benchmarks" : "benchmarks") excluded:
+                    missing, invalid, or duplicate results, or non-finite percentages.</p>
+
+                @if (ranking.Rows.Length == 0)
+                {
+                    <div class="empty-panel">
+                        @if (HasFilter && ranking.ComparableCount + ranking.ExcludedCount == 0)
+                        {
+                            <h3>No microbenchmarks match "@FilterText".</h3>
+                            <p>Try a different search or clear the filter.</p>
+                        }
+                        else if (ranking.ComparableCount == 0)
+                        {
+                            <h3>No comparable benchmarks.</h3>
+                            <p>Try another build or configuration, or change the filter.</p>
+                        }
+                        else
+                        {
+                            <h3>@(HasFilter ? "No slower benchmarks match this filter." : "No slower benchmarks in this comparison.")</h3>
+                            <p>Try @(HasFilter ? "clearing the filter, " : "")reversing the configurations or choosing another build.</p>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="visuals">
+                        <section class="table-panel" aria-labelledby="ranking-table-title">
+                            <div class="panel-heading">
+                                <h3 id="ranking-table-title">Top @ranking.Rows.Length slowdowns</h3>
+                                <div class="table-tools">
+                                    <span class="sort-label">Largest slowdown first</span>
+                                    <label class="scale-option"><input type="checkbox" @bind="_logScale" aria-describedby="ranking-scale-note" /> Log scale</label>
+                                </div>
+                            </div>
+                            <p class="table-note">Times are means; 100% slower means twice the reference time.
+                                <span id="ranking-scale-note">Table bars and chart use @ScaleLabel.</span></p>
+                            <div class="table-scroll" tabindex="0" aria-label="Ranked benchmark table">
+                                <table>
+                                    <caption>Mean execution times and percentage slowdowns on @LaneName(_candidate) relative to @LaneName(_baseline).</caption>
+                                    <thead><tr><th scope="col">#</th><th scope="col">Microbenchmark</th>
+                                        <th scope="col">@LaneName(_candidate)</th><th scope="col">@LaneName(_baseline)</th>
+                                        <th scope="col" aria-sort="descending">Slower by</th></tr></thead>
+                                    <tbody>
+                                        @for (var index = 0; index < ranking.Rows.Length; index++)
+                                        {
+                                            var position = index;
+                                            var row = ranking.Rows[index];
+                                            <tr class="@SelectedClass(position)">
+                                                <td class="rank-number">@(index + 1)</td>
+                                                <th scope="row"><button class="benchmark-name" type="button"
+                                                    aria-pressed="@(_selected == position ? "true" : "false")" title="@row.Identity.DisplayName"
+                                                    @onclick="() => Select(row.Identity.Key)">@row.Identity.DisplayName</button></th>
+                                                <td title="@DurationFormatter.FormatExactNanoseconds(row.CandidateMean)">@DurationFormatter.Format(row.CandidateMean)</td>
+                                                <td title="@DurationFormatter.FormatExactNanoseconds(row.BaselineMean)">@DurationFormatter.Format(row.BaselineMean)</td>
+                                                <td class="slowdown-cell"><strong>@Percent(row.SlowdownPercent)</strong>
+                                                    <span class="mini-track"><span style="width:@BarSize(row)"></span></span>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+
+                        <section class="chart-panel" aria-labelledby="ranking-chart-title">
+                            <div class="panel-heading">
+                                <h3 id="ranking-chart-title">Slowdown by rank</h3>
+                            </div>
+                            <p class="chart-hint">Select a bar to see the benchmark and exact timings below.</p>
+                            <div class="column-chart" role="group" aria-label="Percentage slowdown by benchmark rank" aria-describedby="ranking-scale-note">
+                                <div class="column-scale"><span title="@Percent(Maximum)">@CompactPercent(Maximum)</span><span>0%</span></div>
+                                <div class="column-scroll" tabindex="0" aria-label="Scroll benchmark bars">
+                                    <div class="columns" style="min-width:@(Math.Max(480, ranking.Rows.Length * 8))px">
+                                        @for (var index = 0; index < ranking.Rows.Length; index++)
+                                        {
+                                            var position = index;
+                                            var row = ranking.Rows[index];
+                                            <button type="button" class="column @SelectedClass(position)"
+                                                    aria-pressed="@(_selected == position ? "true" : "false")" aria-label="@ChartLabel(row, position)"
+                                                    title="@ChartLabel(row, position)" @onclick="() => Select(row.Identity.Key)">
+                                                <span class="column-bar" style="height:@BarSize(row)"></span>
+                                                <span class="column-rank">@(position == 0 || (position + 1) % 10 == 0 ? (position + 1).ToString() : "")</span>
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="axis-caption">Microbenchmark rank / @(_logScale ? "log scale" : "linear scale")</p>
+                        </section>
+                    </div>
+
+                    var selected = ranking.Rows[_selected];
+                    <section class="selection-panel" aria-live="polite" aria-label="Selected benchmark">
+                        <div class="selection-label"><span class="eyebrow">INSPECTING #@(_selected + 1)</span>
+                            <strong>@Percent(selected.SlowdownPercent) slower</strong></div>
+                        <div class="selection-info"><h3>@selected.Identity.DisplayName</h3>
+                            <p>@LaneName(_candidate): @DurationFormatter.FormatExactNanoseconds(selected.CandidateMean)
+                                <span>vs</span> @LaneName(_baseline): @DurationFormatter.FormatExactNanoseconds(selected.BaselineMean)</p></div>
+                    </section>
+                }
+
+                <footer class="method-note">
+                    <strong>Comparison method</strong>
+                    <p>Slowdown = (measured mean - reference mean) / reference mean &times; 100.
+                        Each parameter combination is ranked separately, using only the selected pair.</p>
+                    <p>Configurations may use different machines. Rankings do not establish statistical significance.
+                        Near-zero reference means can produce large percentages; inspect the exact timings.</p>
+                </footer>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly RankingQuery _query = new();
+    private BuildSnapshotDescriptor[] _builds = [];
+    private BuildComparisonResult? _comparison;
+    private BenchmarkRankingResult? _ranking;
+    private string _candidate = "coreclr-r2r";
+    private string _baseline = "mono-aot";
+    private string _filter = "";
+    private int _limit = 100;
+    private string FilterText => _filter.Trim();
+    private bool HasFilter => FilterText.Length > 0;
+    private string? _error;
+    private bool _busy = true;
+    private bool _logScale = true;
+    private int _selected;
+    private double Maximum => _ranking!.Rows[0].SlowdownPercent;
+    private string ScaleLabel => _logScale ? "a log scale: log10(1 + slowdown %)" : "a linear scale";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _builds = await Store.GetDescriptorsAsync();
+            if (_builds.Length == 0)
+            {
+                _error = "No build snapshots are available.";
+                return;
+            }
+            _query.BuildId = _builds[0].BuildId;
+            _busy = false;
+            await CompareAsync();
+        }
+        catch (Exception exception) when (IsLoadError(exception))
+        {
+            _error = $"Could not load build snapshots: {exception.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CompareAsync()
+    {
+        if (_busy)
+            return;
+
+        _error = null;
+        if (_query.CandidateId == _query.BaselineId)
+        {
+            _error = "Choose two different configurations to compare.";
+            return;
+        }
+
+        var buildId = _query.BuildId;
+        var candidate = _query.CandidateId;
+        var baseline = _query.BaselineId;
+        var limit = _query.Limit;
+        _busy = true;
+        try
+        {
+            var comparison = _comparison?.Snapshot.Build.BuildId == buildId
+                ? _comparison : BuildComparison.Analyze(await Store.LoadAsync(buildId));
+            var ranking = BenchmarkRanking.Create(comparison, candidate, baseline, limit, _filter);
+            _comparison = comparison;
+            _candidate = candidate;
+            _baseline = baseline;
+            _limit = limit;
+            _ranking = ranking;
+            _selected = 0;
+        }
+        catch (Exception exception) when (IsLoadError(exception) || exception is ArgumentException)
+        {
+            _error = $"Could not load comparison: {exception.Message}" +
+                (_ranking is not null ? " The previous results have not changed." : "");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static bool IsLoadError(Exception exception) =>
+        exception is IOException or InvalidDataException or HttpRequestException
+            or System.Text.Json.JsonException or OperationCanceledException;
+
+    private void ApplyFilter()
+    {
+        if (_comparison is not null)
+        {
+            _ranking = BenchmarkRanking.Create(_comparison, _candidate, _baseline, _limit, _filter);
+            _selected = 0;
+        }
+    }
+
+    private void ClearFilter()
+    {
+        _filter = "";
+        ApplyFilter();
+    }
+
+    private void Select(string identityKey)
+    {
+        var position = _ranking is null ? -1 :
+            Array.FindIndex(_ranking.Rows, row => row.Identity.Key == identityKey);
+        if (position >= 0)
+            _selected = position;
+    }
+    private string SelectedClass(int position) => _selected == position ? "selected" : "";
+    private string BarSize(RankedBenchmark row) =>
+        ((_logScale ? Math.Log10(1 + row.SlowdownPercent) / Math.Log10(1 + Maximum)
+            : row.SlowdownPercent / Maximum) * 100).ToString("0.#####", CultureInfo.InvariantCulture) + "%";
+    private static string Percent(double value) => "+" + value.ToString("N1", CultureInfo.InvariantCulture) + "%";
+    private static string CompactPercent(double value) => value switch
+    {
+        >= 1_000_000_000 => "+" + (value / 1_000_000_000).ToString("0.##", CultureInfo.InvariantCulture) + "B%",
+        >= 1_000_000 => "+" + (value / 1_000_000).ToString("0.##", CultureInfo.InvariantCulture) + "M%",
+        _ => Percent(value)
+    };
+    private static string ChartLabel(RankedBenchmark row, int position) =>
+        $"#{position + 1}: {row.Identity.DisplayName}, {Percent(row.SlowdownPercent)} slower";
+    private static string LaneName(string id) => id switch
+    {
+        "mono-interpreter" => "Mono interpreter",
+        "mono-aot" => "Mono AOT",
+        "coreclr-interpreter" => "CoreCLR interpreter",
+        "coreclr-r2r" => "CoreCLR R2R",
+        _ => throw new ArgumentException("Unknown runtime configuration.", nameof(id))
+    };
+
+    private sealed class RankingQuery
+    {
+        [Required]
+        public string BuildId { get; set; } = "";
+        [Required]
+        public string CandidateId { get; set; } = "coreclr-r2r";
+        [Required]
+        public string BaselineId { get; set; } = "mono-aot";
+        [Range(1, int.MaxValue, ErrorMessage = "Enter a whole number of benchmarks greater than zero.")]
+        public int Limit { get; set; } = 100;
+    }
+}

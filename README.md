@@ -203,9 +203,11 @@ or claim a root cause. It supports only the current public autofiling Markdown
 shape and the known report host/run catalog. Schema changes, unsafe links,
 unsupported runs, and exact-match failures are surfaced as errors.
 
-## Four-runtime same-build comparison
+## Same-build comparisons
 
-Open **Four-runtime comparison** (`/compare-builds`) to compare imported results
+### Compare builds
+
+Open **Compare builds** (`/compare-builds`) to compare imported results
 for Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R. This view
 does not depend on public historical indexes having a ReadyToRun lane. It keeps
 same-build calculations separate from earlier one-iteration ColdStart
@@ -245,13 +247,41 @@ Different machines, measurement counts, and benchmark variability limit the
 interpretation of a single build. These descriptive speedups are not statistical
 significance claims.
 
+### Slowdown ranking
+
+Open **Slowdown ranking** (`/slowdown-ranking`) to rank same-build
+microbenchmarks by percentage slowdown, not absolute execution time. Defaults
+are CoreCLR R2R against Mono AOT and up to 100 results. Choose a build, two
+distinct configurations, and a positive integer result count, then select
+**Rank benchmarks**.
+
+**Filter microbenchmarks** searches names (including namespaces, methods, and
+parameters) and categories as you type; for example, `json`. Matching is
+case-insensitive and ignores surrounding whitespace. Filtering happens before
+ranking and the result limit. The table, chart, and counts use the same filter.
+
+Slowdown is `(measured mean - reference mean) / reference mean * 100`.
+100% slower means twice the reference time. Only positive slowdowns are listed,
+largest first. Each exact benchmark/parameter combination is ranked separately.
+Both table bars and the chart default to `log10(1 + slowdown %)` scaling;
+uncheck **Log scale** above the table for linear scaling. Percentage labels are
+unchanged by scaling. Select a benchmark name or chart bar to inspect exact mean times.
+
+Unlike Compare builds' four-way aggregates, ranking requires valid, unique
+measurements in only the **two selected configurations**. Missing, invalid,
+duplicate results and non-finite percentages are excluded and counted beside
+the summary. Comparable cases that are faster or equal are reported as one
+combined count, not ranked. Configurations may use different machines, and
+near-zero reference means can produce large percentages; these comparisons do
+not establish statistical significance.
+
 ### Standalone static build (GitHub Pages)
 
 `src/WasmBenchmarkHistory.Wasm` is a Blazor **WebAssembly** (client-only) app
-that reproduces this same comparison view without a server. It shares its
-comparison logic with the server app via `src/WasmBenchmarkHistory.Core` (no
+that includes **Compare builds** and **Slowdown ranking** without a server. It
+shares its comparison logic with the server app via `src/WasmBenchmarkHistory.Core` (no
 ASP.NET Core dependency), and fetches the bundled `DataSets/*.json.gz`
-snapshots over plain HTTP instead of reading them from the local filesystem. A
+snapshots over HTTP instead of reading them from the local filesystem. A
 `manifest.json` listing available build ids is generated at build time since
 static hosts have no directory listing.
 
@@ -580,12 +610,14 @@ running the app does not.
   speedups.
 - `Components/Pages/CompareBuilds.razor` presents the four-runtime snapshot
   comparison independently of the historical data source.
+- `WasmBenchmarkHistory.Core/BenchmarkRanking.cs` filters and ranks valid
+  same-build pairs. `Components/Pages/SlowdownRanking.razor` presents the results;
+  the WASM project links this page and its scoped CSS rather than duplicating them.
 - `WasmBenchmarkHistory.Core` (separate project) hosts the hosting-agnostic
   pieces of the above (models, `BuildComparison`, `DirectHistoryArchive`
   read/parse logic) so they can be shared with the WebAssembly app below.
-- `WasmBenchmarkHistory.Wasm` (separate project) is the standalone client-only
-  build of the Compare Builds page for GitHub Pages; see "Standalone static
-  build" above.
+- `WasmBenchmarkHistory.Wasm` (separate project) hosts the client-only comparison
+  pages for GitHub Pages; see "Standalone static build" above.
 
 ## Data safety and errors
 
