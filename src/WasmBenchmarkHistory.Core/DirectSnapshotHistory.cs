@@ -58,7 +58,9 @@ public static class DirectSnapshotHistory
         var observations = new List<BenchmarkObservation>();
         foreach (var build in builds)
         {
-            var lane = build.Lanes.Single(value => value.Id == laneId);
+            var lane = build.Lanes.SingleOrDefault(value => value.Id == laneId);
+            if (lane is null)
+                continue;
             var matches = lane.Measurements.Where(value =>
                 value.Identity.DisplayName == benchmark && value.InvalidReason is null).ToArray();
             if (matches.Length > 1)
@@ -94,7 +96,9 @@ public static class DirectSnapshotHistory
         var observations = new List<BenchmarkObservation>();
         foreach (var snapshot in snapshots)
         {
-            var lane = snapshot.Lanes.Single(value => value.Provenance.Id == laneId);
+            var lane = snapshot.Lanes.SingleOrDefault(value => value.Provenance.Id == laneId);
+            if (lane is null)
+                continue;
             var matches = lane.Measurements.Where(value =>
                 value.Identity.DisplayName == benchmark &&
                 value.InvalidReason is null &&
@@ -226,6 +230,7 @@ public static class DirectSnapshotHistory
         "mono-aot" => "mono-wasm-aot",
         "coreclr-interpreter" => "coreclr-wasm",
         "coreclr-r2r" => "coreclr-wasm-r2r",
+        BuildComparison.CoreClrR2RComposite => "coreclr-wasm-r2r-composite",
         _ => throw new ArgumentException($"Unknown snapshot lane '{laneId}'.", nameof(laneId))
     };
 
@@ -235,6 +240,7 @@ public static class DirectSnapshotHistory
         "mono-wasm-aot" => "mono-aot",
         "coreclr-wasm" => "coreclr-interpreter",
         "coreclr-wasm-r2r" => "coreclr-r2r",
+        "coreclr-wasm-r2r-composite" => BuildComparison.CoreClrR2RComposite,
         _ => throw new ArgumentException($"Unknown run configuration '{runId}'.", nameof(runId))
     };
 }

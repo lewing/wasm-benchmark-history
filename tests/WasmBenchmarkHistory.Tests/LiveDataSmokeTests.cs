@@ -44,16 +44,19 @@ public sealed class LiveDataSmokeTests
             catalog.Entries,
             entry => entry.Benchmark ==
                 "BenchmarksGame.FannkuchRedux_2.RunBench(n: 10, expectedSum: 73196)");
-        var selectedRuns = KnownRunConfigurations.All.Select(run => run.Id).ToArray();
+        // Optional runs (e.g. composite R2R) join once their report index is published.
+        var selectedRuns = catalog.ActiveRuns.Select(run => run.Id).ToArray();
 
-        Assert.Equal(4, selectedRuns.Length);
+        Assert.Superset(
+            KnownRunConfigurations.Required.Select(run => run.Id).ToHashSet(),
+            selectedRuns.ToHashSet());
         Assert.All(selectedRuns, runId => Assert.True(benchmark.Pages.ContainsKey(runId)));
         var histories = await service.LoadHistoriesAsync(
             catalog,
             benchmark.Benchmark,
             selectedRuns);
 
-        Assert.Equal(4, histories.Count);
+        Assert.Equal(selectedRuns.Length, histories.Count);
         Assert.All(histories, history => Assert.NotEmpty(history.Observations));
         var r2r = Assert.Single(
             histories,

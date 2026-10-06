@@ -5,7 +5,8 @@ public sealed record RunConfiguration(
     string DisplayName,
     Uri? IndexUri,
     string Color,
-    string Description);
+    string Description,
+    bool IsOptional = false);
 
 public static class KnownRunConfigurations
 {
@@ -36,11 +37,23 @@ public static class KnownRunConfigurations
             "CoreCLR Wasm R2R",
             new Uri(BaseUrl + "/reports/allTestHistory/refs/heads/main_x64_ubuntu%2022.04_CompilationMode=wasm_R2RType=r2r_RunKind=micro_RuntimeType=coreclr/ViperUbuntu/AllTestindex.html"),
             "#d56bff",
-            "CoreCLR Wasm ReadyToRun microbenchmarks")
+            "CoreCLR Wasm ReadyToRun microbenchmarks"),
+        // Added by dotnet/performance#5324 (job coreclr_r2r_composite_v8, R2RType=r2r_composite).
+        // Optional until results are published: a missing report index means "no data yet".
+        new(
+            "coreclr-wasm-r2r-composite",
+            "CoreCLR Wasm R2R composite",
+            new Uri(BaseUrl + "/reports/allTestHistory/refs/heads/main_x64_ubuntu%2022.04_CompilationMode=wasm_R2RType=r2r_composite_RunKind=micro_RuntimeType=coreclr/ViperUbuntu/AllTestindex.html"),
+            "#e5484d",
+            "CoreCLR Wasm composite ReadyToRun microbenchmarks",
+            IsOptional: true)
     ];
 
     public static IReadOnlyList<RunConfiguration> Published { get; } =
         All.Where(run => run.IndexUri is not null).ToArray();
+
+    public static IReadOnlyList<RunConfiguration> Required { get; } =
+        All.Where(run => !run.IsOptional).ToArray();
 
     public static RunConfiguration Get(string id) =>
         All.FirstOrDefault(run => run.Id == id)
@@ -63,14 +76,20 @@ public sealed class BenchmarkCatalogEntry(
 
     public bool IsAvailable(string runId) => Pages.ContainsKey(runId) || DirectRuns.Contains(runId);
 
+    // Runs the owning catalog has any data for; optional runs without data are not expected.
+    public IReadOnlyList<RunConfiguration> ExpectedRuns { get; internal set; } =
+        KnownRunConfigurations.Required;
+
     public int AvailableRunCount => KnownRunConfigurations.All.Count(run => IsAvailable(run.Id));
 
-    public bool IsShared => AvailableRunCount == KnownRunConfigurations.All.Count;
+    public int ExpectedRunCount => ExpectedRuns.Count;
+
+    public bool IsShared => ExpectedRuns.All(run => IsAvailable(run.Id));
 
     public string Availability =>
         IsShared
             ? "Shared by all runs"
-            : $"Missing: {string.Join(", ", KnownRunConfigurations.All
+            : $"Missing: {string.Join(", ", ExpectedRuns
                 .Where(run => !IsAvailable(run.Id))
                 .Select(run => run.DisplayName))}";
 }
@@ -82,11 +101,19 @@ public sealed class BenchmarkCatalog
     public BenchmarkCatalog(IEnumerable<BenchmarkCatalogEntry> entries)
     {
         Entries = entries.OrderBy(entry => entry.Benchmark, StringComparer.OrdinalIgnoreCase).ToArray();
+        ActiveRuns = KnownRunConfigurations.All
+            .Where(run => !run.IsOptional || Entries.Any(entry => entry.IsAvailable(run.Id)))
+            .ToArray();
+        foreach (var entry in Entries)
+            entry.ExpectedRuns = ActiveRuns;
         CategoryTree = BuildCategoryTree(Entries);
         _byName = Entries.ToDictionary(entry => entry.Benchmark, StringComparer.Ordinal);
     }
 
     public IReadOnlyList<BenchmarkCatalogEntry> Entries { get; }
+
+    // Required runs plus any optional run with at least one benchmark available.
+    public IReadOnlyList<RunConfiguration> ActiveRuns { get; }
 
     public IReadOnlyList<BenchmarkCatalogNode> CategoryTree { get; }
 

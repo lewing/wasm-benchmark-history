@@ -111,4 +111,6 @@ public sealed record BuildComparisonResult(
     BuildSnapshot Snapshot, BuildComparisonRow[] Rows, LaneCoverage[] Coverage)
 {
     public BuildComparisonRow[] Common => Rows.Where(row => row.IsCommon).ToArray();
+
+    public string[] LaneIds { get; } = BuildComparison.LaneIdsOf(Snapshot);
 }

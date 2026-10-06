@@ -32,7 +32,7 @@ if (args.Length > 0 && args[0] == "--acquire-build")
         args[1], args[2], args.Length == 5 ? args[4] : null);
     var comparison = BuildComparison.Analyze(snapshot);
     Console.WriteLine($"Build {snapshot.Build.BuildId}: {comparison.Rows.Length} identities, " +
-        $"{comparison.Common.Length} valid four-runtime matches.");
+        $"{comparison.Common.Length} valid all-runtime matches.");
     foreach (var coverage in comparison.Coverage)
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(coverage));
     return;
@@ -74,10 +74,10 @@ if (args.Length > 0 && args[0] == "--import-build")
     await BuildSnapshotImporter.WriteAsync(snapshot, args[2]);
     var comparison = BuildComparison.Analyze(snapshot);
     Console.WriteLine($"Build {snapshot.Build.BuildId}: {comparison.Rows.Length} identities, " +
-        $"{comparison.Common.Length} valid four-runtime matches.");
+        $"{comparison.Common.Length} valid all-runtime matches.");
     foreach (var coverage in comparison.Coverage)
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(coverage));
-    foreach (var pair in BuildComparison.Summarize(comparison.Rows))
+    foreach (var pair in BuildComparison.Summarize(comparison.Rows, comparison.LaneIds))
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(pair));
     return;
 }

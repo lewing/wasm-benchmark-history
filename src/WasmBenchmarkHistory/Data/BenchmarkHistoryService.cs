@@ -18,10 +18,19 @@ public sealed class BenchmarkHistoryService(
     {
         var indexTasks = KnownRunConfigurations.Published.Select(async run =>
         {
-            var html = await pageClient.GetStringAsync(
-                run.IndexUri!,
-                TimeSpan.FromMinutes(_options.IndexCacheMinutes),
-                cancellationToken);
+            string html;
+            try
+            {
+                html = await pageClient.GetStringAsync(
+                    run.IndexUri!,
+                    TimeSpan.FromMinutes(_options.IndexCacheMinutes),
+                    cancellationToken);
+            }
+            catch (BenchmarkDataException exception) when (run.IsOptional && IsNotFound(exception))
+            {
+                // Optional runs have no report index until their first results are published.
+                return (Run: run, Links: (IReadOnlyList<BenchmarkLink>)[]);
+            }
             return (Run: run, Links: indexParser.Parse(run.IndexUri!, html));
         });
 
@@ -52,8 +61,9 @@ public sealed class BenchmarkHistoryService(
                     continue;
                 }
 
+                // Direct data augments published histories; optional runs may have direct data first.
                 var fallbackRuns = direct.Value
-                    .Where(pages.ContainsKey)
+                    .Where(runId => pages.ContainsKey(runId) || KnownRunConfigurations.Get(runId).IsOptional)
                     .ToArray();
                 if (fallbackRuns.Length == 0)
                 {
@@ -76,6 +86,9 @@ public sealed class BenchmarkHistoryService(
                 pair.Value,
                 directAvailability.TryGetValue(pair.Key, out var runs) ? runs : null)));
     }
+
+    private static bool IsNotFound(BenchmarkDataException exception) =>
+        exception.InnerException is HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound };
 
     public async Task<IReadOnlyList<BenchmarkHistory>> LoadHistoriesAsync(
         BenchmarkCatalog catalog,

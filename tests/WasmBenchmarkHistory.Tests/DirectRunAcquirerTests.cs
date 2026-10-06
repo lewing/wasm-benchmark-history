@@ -52,7 +52,26 @@ public sealed class DirectRunAcquirerTests
         var lanes = DirectRunAcquirer.ParseTimeline(timeline.RootElement);
 
         Assert.Equal(BuildComparison.LaneIds, lanes.Select(lane => lane.Id));
-        Assert.Equal(new int?[] { 11, 12, 13, null }, lanes.Select(lane => lane.LogId));
+        Assert.Equal(new int?[] { 11, 12, 13, null, null }, lanes.Select(lane => lane.LogId));
+    }
+
+    [Fact]
+    public void ParseTimeline_MapsCompositeR2RLaneSeparatelyFromPerAssemblyR2R()
+    {
+        using var timeline = JsonDocument.Parse("""
+            {"records":[
+              {"id":"r2r","type":"Job","name":"Performance micro wasm_coreclr wasm coreclr_r2r_v8 linux  x64 perfviper net11.0"},
+              {"id":"composite","type":"Job","name":"Performance micro wasm_coreclr wasm coreclr_r2r_composite_v8 linux  x64 perfviper net11.0"},
+              {"id":"send1","parentId":"r2r","type":"Task","name":"Send job to Helix (Unix)","log":{"id":21}},
+              {"id":"send2","parentId":"composite","type":"Task","name":"Send job to Helix (Unix)","log":{"id":22}}
+            ]}
+            """);
+
+        var lanes = DirectRunAcquirer.ParseTimeline(timeline.RootElement)
+            .ToDictionary(lane => lane.Id, lane => lane.LogId);
+
+        Assert.Equal(21, lanes["coreclr-r2r"]);
+        Assert.Equal(22, lanes[BuildComparison.CoreClrR2RComposite]);
     }
 
     [Fact]

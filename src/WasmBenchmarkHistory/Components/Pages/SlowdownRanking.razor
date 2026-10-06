@@ -334,14 +334,7 @@
     };
     private static string ChartLabel(RankedBenchmark row, int position) =>
         $"#{position + 1}: {row.Identity.DisplayName}, {Percent(row.SlowdownPercent)} slower";
-    private static string LaneName(string id) => id switch
-    {
-        "mono-interpreter" => "Mono interpreter",
-        "mono-aot" => "Mono AOT",
-        "coreclr-interpreter" => "CoreCLR interpreter",
-        "coreclr-r2r" => "CoreCLR R2R",
-        _ => throw new ArgumentException("Unknown runtime configuration.", nameof(id))
-    };
+    private static string LaneName(string id) => BuildComparison.DisplayName(id);
 
     private sealed class RankingQuery
     {

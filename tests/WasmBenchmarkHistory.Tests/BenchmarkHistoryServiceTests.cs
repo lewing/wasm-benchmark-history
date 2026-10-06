@@ -66,12 +66,84 @@ public sealed class BenchmarkHistoryServiceTests
         }
     }
 
-    private sealed class FixtureHandler : HttpMessageHandler
+    [Fact]
+    public async Task MissingOptionalRunIndexLoadsCatalogWithoutThatRun()
+    {
+        var cacheDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "wasm-benchmark-history-tests",
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = Options.Create(new BenchmarkDataOptions
+            {
+                CacheDirectory = cacheDirectory
+            });
+            using var httpClient = new HttpClient(new FixtureHandler(notFoundMarker: "R2RType=r2r_composite"));
+            var service = new BenchmarkHistoryService(
+                new CachedPageClient(httpClient, new DiskPageCache(options), NullLogger<CachedPageClient>.Instance),
+                new BenchmarkIndexParser(),
+                new BenchmarkHistoryParser(),
+                options);
+
+            var catalog = await service.LoadCatalogAsync();
+
+            Assert.NotEmpty(catalog.Entries);
+            Assert.Equal(KnownRunConfigurations.Required, catalog.ActiveRuns);
+            Assert.All(catalog.Entries, entry => Assert.False(entry.IsAvailable("coreclr-wasm-r2r-composite")));
+        }
+        finally
+        {
+            if (Directory.Exists(cacheDirectory))
+            {
+                Directory.Delete(cacheDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MissingRequiredRunIndexStillFailsCatalog()
+    {
+        var cacheDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "wasm-benchmark-history-tests",
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = Options.Create(new BenchmarkDataOptions
+            {
+                CacheDirectory = cacheDirectory
+            });
+            using var httpClient = new HttpClient(new FixtureHandler(notFoundMarker: "R2RType=r2r_RunKind"));
+            var service = new BenchmarkHistoryService(
+                new CachedPageClient(httpClient, new DiskPageCache(options), NullLogger<CachedPageClient>.Instance),
+                new BenchmarkIndexParser(),
+                new BenchmarkHistoryParser(),
+                options);
+
+            await Assert.ThrowsAsync<BenchmarkDataException>(() => service.LoadCatalogAsync());
+        }
+        finally
+        {
+            if (Directory.Exists(cacheDirectory))
+            {
+                Directory.Delete(cacheDirectory, recursive: true);
+            }
+        }
+    }
+
+    private sealed class FixtureHandler(string? notFoundMarker = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            if (notFoundMarker is not null
+                && Uri.UnescapeDataString(request.RequestUri!.AbsoluteUri).Contains(notFoundMarker, StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { RequestMessage = request });
+            }
+
             var content = request.RequestUri!.AbsolutePath.EndsWith(
                 "AllTestindex.html",
                 StringComparison.OrdinalIgnoreCase)
