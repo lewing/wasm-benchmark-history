@@ -31,6 +31,8 @@ public static class DirectSnapshotHistory
         var availability = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var snapshot in snapshots)
         {
+            if (snapshot.IsPublishedHistory)
+                continue;
             var result = BuildComparison.Analyze(snapshot);
             foreach (var lane in snapshot.Lanes)
             {
@@ -96,6 +98,8 @@ public static class DirectSnapshotHistory
         var observations = new List<BenchmarkObservation>();
         foreach (var snapshot in snapshots)
         {
+            if (snapshot.IsPublishedHistory)
+                continue;
             var lane = snapshot.Lanes.SingleOrDefault(value => value.Provenance.Id == laneId);
             if (lane is null)
                 continue;

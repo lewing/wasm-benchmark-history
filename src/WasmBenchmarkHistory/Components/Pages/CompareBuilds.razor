@@ -2,11 +2,11 @@
 @inject IBuildSnapshotStore Store
 @inject IDirectHistoryArchiveSource DirectHistory
 
-<PageTitle>Four-runtime Wasm comparison</PageTitle>
+<PageTitle>Wasm runtime comparison</PageTitle>
 
 <section class="intro">
     <p class="eyebrow">SAME-BUILD MEASUREMENTS</p>
-    <h1>Four Wasm runtime modes</h1>
+    <h1>Compare Wasm runtime modes</h1>
     <p>Compare Mono interpreter, Mono AOT, CoreCLR interpreter, CoreCLR R2R, and (when the build ran it) CoreCLR R2R composite.
         Snapshot-to-snapshot calculations stay within one build. The same exact observations
         can also augment <a href="/">historical trends</a>; earlier ColdStart runs are never mixed in.</p>
@@ -31,8 +31,7 @@ else if (_result is null)
 else
 {
     var snapshot = _result.Snapshot;
-    <p class="capture"><strong>@snapshot.CaptureSource</strong> · Build @snapshot.Build.BuildId
-        (@snapshot.Build.BuildNumber) · captured
+    <p class="capture"><strong>@snapshot.CaptureSource</strong> · @snapshot.DisplayLabel · captured
         @(snapshot.CapturedAt?.ToString("u", CultureInfo.InvariantCulture) ?? "before capture timestamps were recorded")</p>
     <section class="notice">
         <strong>Descriptive comparison, not a significance claim.</strong>
@@ -61,9 +60,10 @@ else
                     {
                         <tr>
                             <th>@LaneName(coverage.LaneId)</th>
-                            <td>@coverage.Partitions / @coverage.ExpectedPartitions</td>
+                            <td>@(snapshot.IsPublishedHistory ? "unavailable" : $"{coverage.Partitions} / {coverage.ExpectedPartitions}")</td>
                             <td>@coverage.Entries</td><td>@coverage.Valid</td><td>@coverage.Missing</td>
-                            <td>@coverage.Invalid</td><td>@coverage.Duplicates</td><td>@coverage.Unidentified</td>
+                            <td>@coverage.Invalid</td><td>@coverage.Duplicates</td>
+                            <td>@(snapshot.IsPublishedHistory ? "unavailable" : coverage.Unidentified.ToString())</td>
                         </tr>
                     }
                 </tbody>
@@ -186,7 +186,9 @@ else
                 }
             </select></label>
         </div>
-        <p>Mean, standard deviation (SD), standard error (SE), retained statistics sample count (N).
+        <p>@(snapshot.IsPublishedHistory
+            ? "Published primary values and error bars; error-bar semantics and sample counts are unavailable."
+            : "Mean, standard deviation (SD), standard error (SE), retained statistics sample count (N).")
             Individual speedups appear only for valid all-runtime matches. Expand a benchmark for source details.</p>
         <div class="table-wrap">
             <table class="measurements">
@@ -219,8 +221,10 @@ else
                                             Median @DurationFormatter.Format(measurement.Statistics.Median, detailUnit);
                                             min @DurationFormatter.Format(measurement.Statistics.Min, detailUnit);
                                             max @DurationFormatter.Format(measurement.Statistics.Max, detailUnit).</p>
-                                        <p>Exact mean @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.Mean);
-                                            exact SE @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.StandardError).</p>
+                                        <p>Exact stored value @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.Mean);
+                                            @(snapshot.IsPublishedHistory ? "published error" : "exact SE")
+                                            @DurationFormatter.FormatExactNanoseconds(snapshot.IsPublishedHistory
+                                                ? measurement.PublishedError : measurement.Statistics.StandardError).</p>
                                         <p>Measurement settings: @(measurement.MeasurementConfiguration ?? "unavailable")</p>
                                     }
                                 }
@@ -237,8 +241,16 @@ else
                                         <strong title="@DurationFormatter.FormatExactNanoseconds(stats.Mean)">
                                             @DurationFormatter.Format(stats.Mean.Value, unit)
                                         </strong>
-                                        <small>SD @DurationFormatter.Format(stats.StandardDeviation, unit);
-                                            SE @DurationFormatter.Format(stats.StandardError, unit); N @stats.N</small>
+                                        @if (snapshot.IsPublishedHistory)
+                                        {
+                                            <small>Published error @DurationFormatter.Format(measurement.PublishedError, unit);
+                                                N unavailable</small>
+                                        }
+                                        else
+                                        {
+                                            <small>SD @DurationFormatter.Format(stats.StandardDeviation, unit);
+                                                SE @DurationFormatter.Format(stats.StandardError, unit); N @stats.N</small>
+                                        }
                                         <small>Exact @DurationFormatter.FormatExactNanoseconds(stats.Mean)</small>
                                         @if (row.IsCommon)
                                         {
@@ -265,16 +277,24 @@ else
     </section>
 
     <section>
-        <h2>Build and partition provenance</h2>
-        <p>Build @snapshot.Build.BuildId (@snapshot.Build.BuildNumber), @snapshot.Build.SourceDate</p>
+        <h2>Snapshot provenance</h2>
+        <p>@snapshot.DisplayLabel</p>
         <p>Runtime <code>@snapshot.Build.RuntimeSha</code><br />
             Performance <code>@snapshot.Build.PerformanceSha</code></p>
         @foreach (var lane in snapshot.Lanes)
         {
             <details class="provenance">
                 <summary>@lane.Provenance.DisplayName</summary>
-                <p>Helix job <code>@lane.Provenance.HelixJobId</code>;
-                    @lane.Partitions.Length / @lane.Provenance.ExpectedPartitions partitions captured.</p>
+                @if (snapshot.IsPublishedHistory)
+                {
+                    <p>Public report history selected by exact timestamp and commit identities.
+                        Build number, Helix job, and partition coverage unavailable.</p>
+                }
+                else
+                {
+                    <p>Helix job <code>@lane.Provenance.HelixJobId</code>;
+                        @lane.Partitions.Length / @lane.Provenance.ExpectedPartitions partitions captured.</p>
+                }
                 <p>Target runtime package: @lane.Provenance.RuntimeVersion<br />V8: @lane.Provenance.V8Version<br />
                     Workload: @lane.Provenance.WorkloadVersion<br />Configuration: @lane.Provenance.Configuration</p>
                 <p>Host SDK (not target runtime): @(lane.Provenance.HostSdkVersion ?? "unavailable")<br />
@@ -384,7 +404,7 @@ else
             ? number.ToString("0.000'x'", CultureInfo.InvariantCulture) : "unavailable";
 
     private string BuildLabel(string id) => _buildDescriptors.TryGetValue(id, out var descriptor)
-        ? $"{descriptor.BuildId} · {descriptor.BuildNumber} · {descriptor.CaptureSource}"
+        ? $"{descriptor.DisplayLabel} · {descriptor.CaptureSource}"
         : id;
 
     private DirectHistoryTrendRow[] TrendRows => _historyArchive is null || _trendBenchmark is null

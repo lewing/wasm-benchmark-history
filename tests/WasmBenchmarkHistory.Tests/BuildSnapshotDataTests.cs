@@ -5,6 +5,46 @@ namespace WasmBenchmarkHistory.Tests;
 public sealed class BuildSnapshotDataTests
 {
     [Fact]
+    public async Task PublishedOctober6SnapshotContainsCompositeAndStrictFiveRuntimeComparison()
+    {
+        var name = "published-20261006093857-7ede41e0cbfd6d7d2fbabb66ede45118f076c6af-" +
+            "de35ca24c8ca1417d24197dc031bf73d1134adf7.json.gz";
+        var path = Path.Combine(AppContext.BaseDirectory, "DataSets", name);
+        var snapshot = await BuildSnapshotImporter.ReadAsync(path);
+        var result = BuildComparison.Analyze(snapshot);
+
+        Assert.True(snapshot.IsPublishedHistory);
+        Assert.True(new FileInfo(path).Length < 650_000);
+        Assert.Equal(new DateTime(2026, 10, 6, 9, 38, 57), snapshot.PublishedIdentity!.Value.Timestamp);
+        Assert.Equal("unavailable", snapshot.Build.BuildNumber);
+        Assert.Equal(BuildComparison.LaneIds, result.LaneIds);
+        Assert.Equal(5697, result.Rows.Length);
+        Assert.Equal(4233, result.Common.Length);
+        Assert.Equal([5310, 5293, 5280, 5259, 5648], result.Coverage.Select(value => value.Valid));
+        Assert.Equal([0, 6, 0, 0, 3], result.Coverage.Select(value => value.Invalid));
+        Assert.All(result.Coverage, value => Assert.Equal(0, value.Duplicates));
+        Assert.All(snapshot.Lanes, lane =>
+        {
+            Assert.Empty(lane.Partitions);
+            Assert.All(lane.Measurements, value =>
+            {
+                Assert.Null(value.Statistics.N);
+                Assert.Null(value.Statistics.StandardError);
+                Assert.Null(value.Statistics.OriginalValues);
+            });
+        });
+        var ranking = BenchmarkRanking.Create(result, BuildComparison.CoreClrR2RComposite,
+            "coreclr-r2r", 100);
+        Assert.Equal(100, ranking.Rows.Length);
+        Assert.True(ranking.ComparableCount > 4000);
+        Assert.All(ranking.Rows, value => Assert.True(value.SlowdownPercent > 0));
+
+        var example = result.Rows.Single(row => row.Identity.DisplayName == "ArrayDeAbstraction.foreach_member_array");
+        Assert.Equal(195.31, example.Cells[BuildComparison.CoreClrR2RComposite].ValidMeasurement!.Statistics.Mean);
+        Assert.Equal(190.56, example.Cells["coreclr-r2r"].ValidMeasurement!.Statistics.Mean);
+    }
+
+    [Fact]
     public async Task Build3068640_ContainsCompleteInventoryAndReproducibleCommonSet()
     {
         var snapshot = await BuildSnapshotImporter.ReadAsync(

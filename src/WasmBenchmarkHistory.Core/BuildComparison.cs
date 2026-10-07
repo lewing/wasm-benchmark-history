@@ -69,7 +69,7 @@ public static class BuildComparison
                 {
                     0 => "missing",
                     > 1 => "duplicate",
-                    _ => InvalidReason(values[0].Statistics) is null && values[0].InvalidReason is null
+                    _ => InvalidReason(values[0].Statistics, requireSampleCount: !snapshot.IsPublishedHistory) is null && values[0].InvalidReason is null
                         ? "valid" : "invalid"
                 };
                 return new ComparisonCell(status, values);
@@ -109,11 +109,11 @@ public static class BuildComparison
             .ToArray();
     }
 
-    public static string? InvalidReason(BenchmarkStatistics statistics)
+    public static string? InvalidReason(BenchmarkStatistics statistics, bool requireSampleCount = true)
     {
         if (statistics.Mean is not { } mean || !double.IsFinite(mean) || mean <= 0)
             return "Mean must be finite and positive.";
-        if (statistics.N is not > 0)
+        if (requireSampleCount && statistics.N is not > 0)
             return "Statistics.N must be positive.";
         if (new[] { statistics.StandardDeviation, statistics.StandardError, statistics.Variance }
             .Any(value => value is { } number && (!double.IsFinite(number) || number < 0)))
@@ -123,13 +123,20 @@ public static class BuildComparison
 
     public static void Validate(BuildSnapshot snapshot)
     {
-        if (snapshot.SchemaVersion != 1)
+        if (snapshot.SchemaVersion is not (1 or 2))
             throw new InvalidDataException("Unsupported build snapshot schema.");
         if (LaneSetError(snapshot.Lanes.Select(lane => lane.Provenance.Id).ToArray()) is { } laneError)
             throw new InvalidDataException(laneError);
         if (string.IsNullOrWhiteSpace(snapshot.Build.BuildId) ||
             !IsSha(snapshot.Build.RuntimeSha) || !IsSha(snapshot.Build.PerformanceSha))
             throw new InvalidDataException("Build ID and full runtime/performance commit SHAs are required.");
+        if (snapshot.IsPublishedHistory)
+        {
+            PublishedBuildSnapshot.Validate(snapshot);
+            return;
+        }
+        if (snapshot.PublishedIdentity is not null)
+            throw new InvalidDataException("A direct snapshot cannot declare a published-history identity.");
         foreach (var lane in snapshot.Lanes)
         {
             if (lane.Provenance.Build != snapshot.Build)

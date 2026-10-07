@@ -160,6 +160,8 @@ public static class DirectHistoryArchiveBuilder
     private static DirectHistoryBuild Project(BuildSnapshot snapshot)
     {
         BuildComparison.Validate(snapshot);
+        if (snapshot.IsPublishedHistory)
+            throw new InvalidDataException("Published-history snapshots cannot enter the verified direct-history archive.");
         return new DirectHistoryBuild(
             snapshot.Build,
             snapshot.CaptureSource,

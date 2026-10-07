@@ -11,7 +11,8 @@ public sealed class BenchmarkHistoryParser
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
-    public BenchmarkHistory Parse(string benchmark, RunConfiguration run, string html)
+    public BenchmarkHistory Parse(
+        string benchmark, RunConfiguration run, string html, bool preserveInvalidMeasurements = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(benchmark);
         ArgumentNullException.ThrowIfNull(run);
@@ -48,7 +49,8 @@ public sealed class BenchmarkHistoryParser
 
         var primary = ExtractDelimited(html, primaryStart, '{', '}', benchmark);
         var timestamps = ParseStringArray(ExtractArray(primary, "x", benchmark), benchmark, "x");
-        var values = ParseRequiredNumberArray(ExtractArray(primary, "y", benchmark), benchmark, "y");
+        var values = ParseRequiredNumberArray(
+            ExtractArray(primary, "y", benchmark), benchmark, "y", preserveInvalidMeasurements);
         var gitHash = ExtractObject(primary, "gitHash", benchmark);
         var runtimeShas = ParseStringArray(
             ExtractArray(gitHash, "runtime", benchmark),
@@ -71,7 +73,8 @@ public sealed class BenchmarkHistoryParser
             errors = ParseNullableNumberArray(
                 ExtractArray(errorObject, "array", benchmark),
                 benchmark,
-                "error_y.array");
+                "error_y.array",
+                preserveInvalidMeasurements);
         }
 
         var lengths = new[]
@@ -340,21 +343,23 @@ public sealed class BenchmarkHistoryParser
     private static IReadOnlyList<double> ParseRequiredNumberArray(
         string array,
         string benchmark,
-        string field)
+        string field,
+        bool preserveInvalidMeasurements = false)
     {
-        var nullableValues = ParseNullableNumberArray(array, benchmark, field);
-        if (nullableValues.Any(value => value is null))
+        var nullableValues = ParseNullableNumberArray(array, benchmark, field, preserveInvalidMeasurements);
+        if (!preserveInvalidMeasurements && nullableValues.Any(value => value is null))
         {
             throw SchemaError(benchmark, $"'{field}' contained null.");
         }
 
-        return nullableValues.Select(value => value!.Value).ToArray();
+        return nullableValues.Select(value => value ?? double.NaN).ToArray();
     }
 
     private static IReadOnlyList<double?> ParseNullableNumberArray(
         string array,
         string benchmark,
-        string field)
+        string field,
+        bool preserveInvalidMeasurements = false)
     {
         var body = array.AsSpan(1, array.Length - 2);
         if (body.Trim().IsEmpty)
@@ -377,7 +382,7 @@ public sealed class BenchmarkHistoryParser
                     NumberStyles.Float,
                     CultureInfo.InvariantCulture,
                     out var value)
-                || !double.IsFinite(value))
+                || !preserveInvalidMeasurements && !double.IsFinite(value))
             {
                 throw SchemaError(benchmark, $"'{field}' contained invalid number '{token}'.");
             }

@@ -1,6 +1,27 @@
 using WasmBenchmarkHistory.Components;
 using WasmBenchmarkHistory.Data;
 
+if (args.Length > 0 && args[0] == "--acquire-published-snapshot")
+{
+    if (args.Length != 5 || !DateTime.TryParseExact(args[1], "yyyy-MM-dd HH:mm:ss",
+        System.Globalization.CultureInfo.InvariantCulture,
+        System.Globalization.DateTimeStyles.None, out var timestamp))
+        throw new ArgumentException(
+            "Usage: --acquire-published-snapshot \"yyyy-MM-dd HH:mm:ss\" <runtime-sha> <performance-sha> <output-directory>");
+    var key = new ObservationKey(DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified),
+        args[2].ToLowerInvariant(), args[3].ToLowerInvariant());
+    using var client = new HttpClient(new HttpClientHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    }) { Timeout = TimeSpan.FromSeconds(90) };
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("wasm-benchmark-history-public-snapshot/1.0");
+    var output = Path.Combine(Path.GetFullPath(args[4]), PublishedBuildSnapshot.Id(key) + ".json.gz");
+    var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "wasm-benchmark-history", "published-snapshots");
+    await new PublishedSnapshotAcquirer(client, Console.WriteLine).AcquireAsync(key, output, cache);
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--discover-build")
 {
     if (args.Length != 2)
