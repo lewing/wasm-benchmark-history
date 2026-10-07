@@ -116,7 +116,7 @@ public sealed class DirectSnapshotHistoryTests
 
         var match = Assert.Single(ObservationMatcher.MatchStrict(histories));
 
-        Assert.Equal(4, match.Observations.Count);
+        Assert.Equal(KnownRunConfigurations.All.Count, match.Observations.Count);
         Assert.All(match.Observations.Values,
             observation => Assert.Equal(ObservationSource.DirectSnapshot, observation.Source));
     }

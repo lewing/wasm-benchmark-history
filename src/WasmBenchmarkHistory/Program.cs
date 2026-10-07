@@ -1,6 +1,27 @@
 using WasmBenchmarkHistory.Components;
 using WasmBenchmarkHistory.Data;
 
+if (args.Length > 0 && args[0] == "--acquire-published-snapshot")
+{
+    if (args.Length != 5 || !DateTime.TryParseExact(args[1], "yyyy-MM-dd HH:mm:ss",
+        System.Globalization.CultureInfo.InvariantCulture,
+        System.Globalization.DateTimeStyles.None, out var timestamp))
+        throw new ArgumentException(
+            "Usage: --acquire-published-snapshot \"yyyy-MM-dd HH:mm:ss\" <runtime-sha> <performance-sha> <output-directory>");
+    var key = new ObservationKey(DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified),
+        args[2].ToLowerInvariant(), args[3].ToLowerInvariant());
+    using var client = new HttpClient(new HttpClientHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    }) { Timeout = TimeSpan.FromSeconds(90) };
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("wasm-benchmark-history-public-snapshot/1.0");
+    var output = Path.Combine(Path.GetFullPath(args[4]), PublishedBuildSnapshot.Id(key) + ".json.gz");
+    var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "wasm-benchmark-history", "published-snapshots");
+    await new PublishedSnapshotAcquirer(client, Console.WriteLine).AcquireAsync(key, output, cache);
+    return;
+}
+
 if (args.Length > 0 && args[0] == "--discover-build")
 {
     if (args.Length != 2)
@@ -32,7 +53,7 @@ if (args.Length > 0 && args[0] == "--acquire-build")
         args[1], args[2], args.Length == 5 ? args[4] : null);
     var comparison = BuildComparison.Analyze(snapshot);
     Console.WriteLine($"Build {snapshot.Build.BuildId}: {comparison.Rows.Length} identities, " +
-        $"{comparison.Common.Length} valid four-runtime matches.");
+        $"{comparison.Common.Length} valid all-runtime matches.");
     foreach (var coverage in comparison.Coverage)
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(coverage));
     return;
@@ -74,10 +95,10 @@ if (args.Length > 0 && args[0] == "--import-build")
     await BuildSnapshotImporter.WriteAsync(snapshot, args[2]);
     var comparison = BuildComparison.Analyze(snapshot);
     Console.WriteLine($"Build {snapshot.Build.BuildId}: {comparison.Rows.Length} identities, " +
-        $"{comparison.Common.Length} valid four-runtime matches.");
+        $"{comparison.Common.Length} valid all-runtime matches.");
     foreach (var coverage in comparison.Coverage)
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(coverage));
-    foreach (var pair in BuildComparison.Summarize(comparison.Rows))
+    foreach (var pair in BuildComparison.Summarize(comparison.Rows, comparison.LaneIds))
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(pair));
     return;
 }

@@ -35,6 +35,44 @@ public sealed class DirectHistoryArchiveTests
     }
 
     [Fact]
+    public void Create_DropsIncompleteOptionalLaneWithoutExcludingBuild()
+    {
+        var snapshot = Snapshot("103", "2026-09-05T00:00:00Z", 13);
+        snapshot = snapshot with
+        {
+            Lanes = snapshot.Lanes.Select(lane => lane.Provenance.Id == BuildComparison.CoreClrR2RComposite
+                ? lane with { Partitions = [], Measurements = [] } : lane).ToArray()
+        };
+
+        var archive = DirectHistoryArchiveBuilder.Create(
+            [snapshot], 5, DateTimeOffset.Parse("2026-09-06T00:00:00Z"));
+
+        var build = Assert.Single(archive.Builds);
+        Assert.Equal(BuildComparison.RequiredLaneIds, build.Lanes.Select(lane => lane.Id));
+        Assert.Empty(archive.Exclusions);
+    }
+
+    [Fact]
+    public void Trend_MarksOptionalLaneNotRunForBuildsThatPredateIt()
+    {
+        var older = Snapshot("104", "2026-09-05T00:00:00Z", 10);
+        older = older with
+        {
+            Lanes = older.Lanes.Where(lane => !BuildComparison.IsOptional(lane.Provenance.Id)).ToArray()
+        };
+        var archive = DirectHistoryArchiveBuilder.Create(
+            [older, Snapshot("105", "2026-09-06T00:00:00Z", 5)],
+            5, DateTimeOffset.Parse("2026-09-07T00:00:00Z"));
+
+        Assert.Equal(BuildComparison.LaneIds, DirectHistoryTrend.LaneIds(archive));
+        var rows = DirectHistoryTrend.Create(archive, "N.T.Run");
+        Assert.Equal("not run", rows[0].Cells[BuildComparison.CoreClrR2RComposite].Status);
+        Assert.Equal("valid", rows[1].Cells[BuildComparison.CoreClrR2RComposite].Status);
+        Assert.Null(rows[1].Cells[BuildComparison.CoreClrR2RComposite].SpeedupVsPrevious);
+        Assert.Equal(1, rows[1].Cells[BuildComparison.CoreClrR2RComposite].SpeedupVsMono);
+    }
+
+    [Fact]
     public async Task CompactExport_IsDeterministicAndOmitsRawSamples()
     {
         var archive = DirectHistoryArchiveBuilder.Create(

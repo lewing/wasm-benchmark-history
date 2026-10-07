@@ -71,7 +71,8 @@ public sealed record BuildMeasurement(
     string Report,
     string? InvalidReason,
     int? MeasurementCount = null,
-    string? MeasurementConfiguration = null);
+    string? MeasurementConfiguration = null,
+    double? PublishedError = null);
 
 public sealed record PartitionCoverage(
     string Name, string Status, string Note, int Reports, int Measurements, int Unidentified);
@@ -87,7 +88,17 @@ public sealed record BuildSnapshot(
     BuildLane[] Lanes,
     string[] Caveats,
     string CaptureSource = "Imported snapshot",
-    DateTimeOffset? CapturedAt = null);
+    DateTimeOffset? CapturedAt = null,
+    ObservationKey? PublishedIdentity = null)
+{
+    [JsonIgnore]
+    public bool IsPublishedHistory => SchemaVersion == 2;
+
+    [JsonIgnore]
+    public string DisplayLabel => IsPublishedHistory
+        ? $"Published · {Build.SourceDate} · {Build.RuntimeSha[..12]}"
+        : $"{Build.BuildId} / {Build.BuildNumber}";
+}
 
 public sealed record LaneCoverage(
     string LaneId, int Entries, int Unique, int Valid, int Missing, int Invalid, int Duplicates,
@@ -111,4 +122,6 @@ public sealed record BuildComparisonResult(
     BuildSnapshot Snapshot, BuildComparisonRow[] Rows, LaneCoverage[] Coverage)
 {
     public BuildComparisonRow[] Common => Rows.Where(row => row.IsCommon).ToArray();
+
+    public string[] LaneIds { get; } = BuildComparison.LaneIdsOf(Snapshot);
 }

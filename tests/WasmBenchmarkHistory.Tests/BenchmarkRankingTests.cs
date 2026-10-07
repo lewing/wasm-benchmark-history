@@ -206,6 +206,21 @@ public sealed class BenchmarkRankingTests
             StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Create_ReportsBuildWithoutRequestedOptionalLane()
+    {
+        var build = new BuildProvenance("1", "test", new('a', 40), new('b', 40), "2026-09-29");
+        var lanes = BuildComparison.RequiredLaneIds.Select(id => new BuildLane(
+            new(id, id, "", build, "", "", "", "", 1), [new("Partition1", "passed", "", 1, 0, 0)], []))
+            .ToArray();
+        var comparison = BuildComparison.Analyze(new(1, build, lanes, []));
+
+        var exception = Assert.Throws<ArgumentException>(() => BenchmarkRanking.Create(
+            comparison, BuildComparison.CoreClrR2RComposite, "coreclr-r2r", 10));
+
+        Assert.Contains("no CoreCLR R2R composite results", exception.Message);
+    }
+
     private static BuildMeasurement Measurement(string method, double mean) =>
         new(new("Test", "Benchmark", method, ""), [], new(mean, null, null, null, 10, null, null),
             "Partition1", "report.json", null);

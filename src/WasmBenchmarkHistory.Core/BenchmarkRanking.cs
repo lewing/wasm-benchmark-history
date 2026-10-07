@@ -14,6 +14,10 @@ public static class BenchmarkRanking
         if (!BuildComparison.LaneIds.Contains(candidateId, StringComparer.Ordinal) ||
             !BuildComparison.LaneIds.Contains(baselineId, StringComparer.Ordinal))
             throw new ArgumentException("Choose two known runtime configurations.");
+        foreach (var laneId in new[] { candidateId, baselineId })
+            if (!comparison.LaneIds.Contains(laneId, StringComparer.Ordinal))
+                throw new ArgumentException(
+                    $"Build {comparison.Snapshot.Build.BuildId} has no {BuildComparison.DisplayName(laneId)} results.");
         if (candidateId == baselineId)
             throw new ArgumentException("Choose two different runtime configurations.");
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);

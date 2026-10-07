@@ -104,6 +104,11 @@ public sealed class DirectRunAcquirer
         {
             var partitions = new List<ImportPartition>();
             ReportProvenance? reportProvenance = null;
+            if (lane.HelixJobId is null && BuildComparison.IsOptional(lane.Id))
+            {
+                // Builds that predate an optional lane simply omit it.
+                continue;
+            }
             if (lane.HelixJobId is null)
             {
                 caveats.Add($"{lane.DisplayName} was not discovered in the build timeline.");
@@ -306,7 +311,9 @@ public sealed class DirectRunAcquirer
         ("mono-interpreter", "Mono interpreter", "Performance micro wasm wasm v8 linux"),
         ("mono-aot", "Mono AOT", "Performance micro wasm aot v8 linux"),
         ("coreclr-interpreter", "CoreCLR interpreter", "Performance micro wasm_coreclr wasm coreclr_v8 linux"),
-        ("coreclr-r2r", "CoreCLR R2R", "Performance micro wasm_coreclr wasm coreclr_r2r_v8 linux")
+        ("coreclr-r2r", "CoreCLR R2R", "Performance micro wasm_coreclr wasm coreclr_r2r_v8 linux"),
+        (BuildComparison.CoreClrR2RComposite, "CoreCLR R2R composite",
+            "Performance micro wasm_coreclr wasm coreclr_r2r_composite_v8 linux")
     ];
 
     private static (string Id, string DisplayName)? TryMapLane(string? name)
@@ -486,6 +493,8 @@ public sealed class DirectRunAcquirer
         "mono-aot" => "CompilationMode=wasm;RunKind=micro;AOT=true",
         "coreclr-interpreter" => "CompilationMode=wasm;RunKind=micro;RuntimeType=coreclr",
         "coreclr-r2r" => "CompilationMode=wasm;RunKind=micro;RuntimeType=coreclr;R2RType=r2r",
+        BuildComparison.CoreClrR2RComposite =>
+            "CompilationMode=wasm;RunKind=micro;RuntimeType=coreclr;R2RType=r2r_composite",
         _ => throw new InvalidDataException($"Unsupported lane '{id}'.")
     };
 

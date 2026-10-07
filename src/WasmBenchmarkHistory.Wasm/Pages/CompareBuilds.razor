@@ -2,12 +2,12 @@
 @inject IBuildSnapshotStore Store
 @inject IDirectHistoryArchiveSource DirectHistory
 
-<PageTitle>Four-runtime Wasm comparison</PageTitle>
+<PageTitle>Wasm runtime comparison</PageTitle>
 
 <section class="intro">
     <p class="eyebrow">SAME-BUILD MEASUREMENTS</p>
-    <h1>Four Wasm runtime modes</h1>
-    <p>Compare Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R.
+    <h1>Compare Wasm runtime modes</h1>
+    <p>Compare Mono interpreter, Mono AOT, CoreCLR interpreter, CoreCLR R2R, and (when the build ran it) CoreCLR R2R composite.
         Snapshot-to-snapshot calculations stay within one build. The same exact observations
         can also augment <a href="./">historical trends</a>; earlier ColdStart runs are never mixed in.</p>
 </section>
@@ -31,15 +31,14 @@ else if (_result is null)
 else
 {
     var snapshot = _result.Snapshot;
-    <p class="capture"><strong>@snapshot.CaptureSource</strong> · Build @snapshot.Build.BuildId
-        (@snapshot.Build.BuildNumber) · captured
+    <p class="capture"><strong>@snapshot.CaptureSource</strong> · @snapshot.DisplayLabel · captured
         @(snapshot.CapturedAt?.ToString("u", CultureInfo.InvariantCulture) ?? "before capture timestamps were recorded")</p>
     <section class="notice">
         <strong>Descriptive comparison, not a significance claim.</strong>
         <p>One build, different machines and measurement counts. Durations use adaptive units;
             exact nanoseconds remain available in details.
             lower is better. Speedup = baseline mean / candidate mean; above 1 means the candidate is faster.
-            Every aggregate uses the same valid four-runtime intersection, with equal weight per benchmark
+            Every aggregate uses the same valid intersection of all runtimes in the build, with equal weight per benchmark
             and parameter combination. Missing, invalid, or duplicate identities are never replaced with zero.</p>
         @foreach (var caveat in snapshot.Caveats)
         {
@@ -49,7 +48,7 @@ else
 
     <section>
         <h2>Coverage</h2>
-        <p><strong>@_result.Common.Length.ToString("N0")</strong> valid four-runtime matches
+        <p><strong>@_result.Common.Length.ToString("N0")</strong> valid all-runtime matches
             out of <strong>@_result.Rows.Length.ToString("N0")</strong> identities in the union.
             Missing is relative to that union; invalid and duplicate counts are identities, not samples.
             Unidentified records cannot be joined and are listed separately.</p>
@@ -61,9 +60,10 @@ else
                     {
                         <tr>
                             <th>@LaneName(coverage.LaneId)</th>
-                            <td>@coverage.Partitions / @coverage.ExpectedPartitions</td>
+                            <td>@(snapshot.IsPublishedHistory ? "unavailable" : $"{coverage.Partitions} / {coverage.ExpectedPartitions}")</td>
                             <td>@coverage.Entries</td><td>@coverage.Valid</td><td>@coverage.Missing</td>
-                            <td>@coverage.Invalid</td><td>@coverage.Duplicates</td><td>@coverage.Unidentified</td>
+                            <td>@coverage.Invalid</td><td>@coverage.Duplicates</td>
+                            <td>@(snapshot.IsPublishedHistory ? "unavailable" : coverage.Unidentified.ToString())</td>
                         </tr>
                     }
                 </tbody>
@@ -86,9 +86,9 @@ else
         </select>
         <div class="table-wrap">
             <table>
-                <thead><tr><th>Baseline</th><th>Candidate</th><th>Four-way matches</th><th>Speedup</th></tr></thead>
+                <thead><tr><th>Baseline</th><th>Candidate</th><th>All-runtime matches</th><th>Speedup</th></tr></thead>
                 <tbody>
-                    @foreach (var pair in BuildComparison.Summarize(CategoryRows))
+                    @foreach (var pair in BuildComparison.Summarize(CategoryRows, _result.LaneIds))
                     {
                         <tr><td>@LaneName(pair.BaselineId)</td><td>@LaneName(pair.CandidateId)</td>
                             <td>@pair.Count</td><td>@FormatRatio(pair.GeometricMean)</td></tr>
@@ -128,7 +128,7 @@ else
                 <table class="trend-table">
                     <thead>
                         <tr><th>Build</th>
-                            @foreach (var id in BuildComparison.LaneIds)
+                            @foreach (var id in TrendLaneIds)
                             {
                                 <th>@LaneName(id)</th>
                             }
@@ -139,7 +139,7 @@ else
                         {
                             <tr>
                                 <th>@row.Build.BuildNumber<small>@TrendDate(row.Build)</small></th>
-                                @foreach (var id in BuildComparison.LaneIds)
+                                @foreach (var id in TrendLaneIds)
                                 {
                                     var cell = row.Cells[id];
                                     <td>
@@ -176,7 +176,7 @@ else
         <div class="controls">
             <label>Search <input type="search" @bind="_search" @bind:event="oninput" @bind:after="ResetPage" placeholder="Namespace, method, parameters" /></label>
             <label>Rows <select @bind="_rowFilter" @bind:after="ResetPage">
-                <option value="all">All coverage</option><option value="common">Four-way matches</option>
+                <option value="all">All coverage</option><option value="common">All-runtime matches</option>
                 <option value="excluded">Excluded from aggregates</option>
             </select></label>
             <label>Speedup baseline <select @bind="_baseline">
@@ -186,12 +186,14 @@ else
                 }
             </select></label>
         </div>
-        <p>Mean, standard deviation (SD), standard error (SE), retained statistics sample count (N).
-            Individual speedups appear only for valid four-way matches. Expand a benchmark for source details.</p>
+        <p>@(snapshot.IsPublishedHistory
+            ? "Published primary values and error bars; error-bar semantics and sample counts are unavailable."
+            : "Mean, standard deviation (SD), standard error (SE), retained statistics sample count (N).")
+            Individual speedups appear only for valid all-runtime matches. Expand a benchmark for source details.</p>
         <div class="table-wrap">
             <table class="measurements">
                 <thead><tr><th>Benchmark and parameters</th>
-                    @foreach (var id in BuildComparison.LaneIds)
+                    @foreach (var id in _result.LaneIds)
                     {
                         <th>@LaneName(id)</th>
                     }
@@ -206,7 +208,7 @@ else
                                         @onclick="() => _trendBenchmark = row.Identity.DisplayName">Trend</button>
                                 <details><summary>@row.Identity.DisplayName</summary>
                                 <p>@string.Join(", ", RowCategories(row))</p>
-                                @foreach (var id in BuildComparison.LaneIds)
+                                @foreach (var id in _result.LaneIds)
                                 {
                                     @foreach (var measurement in row.Cells[id].Measurements)
                                     {
@@ -219,14 +221,16 @@ else
                                             Median @DurationFormatter.Format(measurement.Statistics.Median, detailUnit);
                                             min @DurationFormatter.Format(measurement.Statistics.Min, detailUnit);
                                             max @DurationFormatter.Format(measurement.Statistics.Max, detailUnit).</p>
-                                        <p>Exact mean @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.Mean);
-                                            exact SE @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.StandardError).</p>
+                                        <p>Exact stored value @DurationFormatter.FormatExactNanoseconds(measurement.Statistics.Mean);
+                                            @(snapshot.IsPublishedHistory ? "published error" : "exact SE")
+                                            @DurationFormatter.FormatExactNanoseconds(snapshot.IsPublishedHistory
+                                                ? measurement.PublishedError : measurement.Statistics.StandardError).</p>
                                         <p>Measurement settings: @(measurement.MeasurementConfiguration ?? "unavailable")</p>
                                     }
                                 }
                                 </details>
                             </th>
-                            @foreach (var id in BuildComparison.LaneIds)
+                            @foreach (var id in _result.LaneIds)
                             {
                                 var cell = row.Cells[id];
                                 <td>
@@ -237,8 +241,16 @@ else
                                         <strong title="@DurationFormatter.FormatExactNanoseconds(stats.Mean)">
                                             @DurationFormatter.Format(stats.Mean.Value, unit)
                                         </strong>
-                                        <small>SD @DurationFormatter.Format(stats.StandardDeviation, unit);
-                                            SE @DurationFormatter.Format(stats.StandardError, unit); N @stats.N</small>
+                                        @if (snapshot.IsPublishedHistory)
+                                        {
+                                            <small>Published error @DurationFormatter.Format(measurement.PublishedError, unit);
+                                                N unavailable</small>
+                                        }
+                                        else
+                                        {
+                                            <small>SD @DurationFormatter.Format(stats.StandardDeviation, unit);
+                                                SE @DurationFormatter.Format(stats.StandardError, unit); N @stats.N</small>
+                                        }
                                         <small>Exact @DurationFormatter.FormatExactNanoseconds(stats.Mean)</small>
                                         @if (row.IsCommon)
                                         {
@@ -265,16 +277,24 @@ else
     </section>
 
     <section>
-        <h2>Build and partition provenance</h2>
-        <p>Build @snapshot.Build.BuildId (@snapshot.Build.BuildNumber), @snapshot.Build.SourceDate</p>
+        <h2>Snapshot provenance</h2>
+        <p>@snapshot.DisplayLabel</p>
         <p>Runtime <code>@snapshot.Build.RuntimeSha</code><br />
             Performance <code>@snapshot.Build.PerformanceSha</code></p>
         @foreach (var lane in snapshot.Lanes)
         {
             <details class="provenance">
                 <summary>@lane.Provenance.DisplayName</summary>
-                <p>Helix job <code>@lane.Provenance.HelixJobId</code>;
-                    @lane.Partitions.Length / @lane.Provenance.ExpectedPartitions partitions captured.</p>
+                @if (snapshot.IsPublishedHistory)
+                {
+                    <p>Public report history selected by exact timestamp and commit identities.
+                        Build number, Helix job, and partition coverage unavailable.</p>
+                }
+                else
+                {
+                    <p>Helix job <code>@lane.Provenance.HelixJobId</code>;
+                        @lane.Partitions.Length / @lane.Provenance.ExpectedPartitions partitions captured.</p>
+                }
                 <p>Target runtime package: @lane.Provenance.RuntimeVersion<br />V8: @lane.Provenance.V8Version<br />
                     Workload: @lane.Provenance.WorkloadVersion<br />Configuration: @lane.Provenance.Configuration</p>
                 <p>Host SDK (not target runtime): @(lane.Provenance.HostSdkVersion ?? "unavailable")<br />
@@ -313,8 +333,9 @@ else
     private int _page;
     private long _loadVersion;
 
-    private string LaneName(string id) =>
-        _result!.Snapshot.Lanes.Single(lane => lane.Provenance.Id == id).Provenance.DisplayName;
+    private static string LaneName(string id) => BuildComparison.DisplayName(id);
+
+    private string[] TrendLaneIds => _historyArchive is null ? [] : DirectHistoryTrend.LaneIds(_historyArchive);
 
     private static string[] RowCategories(BuildComparisonRow row) =>
         row.Categories.Length > 0 ? row.Categories :
@@ -363,6 +384,8 @@ else
             if (version == _loadVersion)
             {
                 _result = BuildComparison.Analyze(snapshot);
+                if (!_result.LaneIds.Contains(_baseline, StringComparer.Ordinal))
+                    _baseline = _result.LaneIds[0];
                 _trendBenchmark ??= _result.Common.FirstOrDefault()?.Identity.DisplayName;
             }
         }
@@ -381,7 +404,7 @@ else
             ? number.ToString("0.000'x'", CultureInfo.InvariantCulture) : "unavailable";
 
     private string BuildLabel(string id) => _buildDescriptors.TryGetValue(id, out var descriptor)
-        ? $"{descriptor.BuildId} · {descriptor.BuildNumber} · {descriptor.CaptureSource}"
+        ? $"{descriptor.DisplayLabel} · {descriptor.CaptureSource}"
         : id;
 
     private DirectHistoryTrendRow[] TrendRows => _historyArchive is null || _trendBenchmark is null

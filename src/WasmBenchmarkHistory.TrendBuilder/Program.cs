@@ -41,6 +41,12 @@ foreach (var run in KnownRunConfigurations.Published)
     {
         indexHtml = await httpClient.GetStringAsync(run.IndexUri!);
     }
+    catch (HttpRequestException exception) when (
+        run.IsOptional && exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+        Console.WriteLine($"  No published results for optional run {run.Id} yet; skipping.");
+        continue;
+    }
     catch (Exception exception)
     {
         Console.Error.WriteLine($"  Failed to fetch index for {run.Id}: {exception.Message}");
@@ -105,7 +111,7 @@ return failures > 0 && availability.Count == 0 ? 1 : 0;
 
 static class CuratedBenchmarks
 {
-    // Shared by all four run configurations as of the last curation pass; spread across
+    // Shared by the four required run configurations as of the last curation pass; spread across
     // distinct top-level categories to exercise a variety of shapes/scales in the UI.
     public static readonly string[] Names =
     [

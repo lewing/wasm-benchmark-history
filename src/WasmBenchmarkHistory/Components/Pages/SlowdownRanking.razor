@@ -24,7 +24,7 @@
                         <InputSelect id="ranking-build" @bind-Value="_query.BuildId" disabled="@_busy">
                             @foreach (var build in _builds)
                             {
-                                <option value="@build.BuildId">@build.BuildId / @build.BuildNumber</option>
+                                <option value="@build.BuildId">@build.DisplayLabel</option>
                             }
                         </InputSelect>
                     </div>
@@ -85,7 +85,7 @@
                 <div class="result-heading">
                     <div>
                         <h2>@LaneName(_candidate) <span>vs</span> @LaneName(_baseline)</h2>
-                        <p>Build @comparison.Snapshot.Build.BuildId / @comparison.Snapshot.Build.SourceDate</p>
+                        <p>@comparison.Snapshot.DisplayLabel · @comparison.Snapshot.CaptureSource</p>
                     </div>
                     <div class="result-actions">
                         <span class="result-count" role="status">Showing @ranking.Rows.Length of @ranking.SlowerCount.ToString("N0")
@@ -106,6 +106,12 @@
                 </div>
                 <p class="coverage-note">@ranking.ExcludedCount.ToString("N0") @(HasFilter ? "matching benchmarks" : "benchmarks") excluded:
                     missing, invalid, or duplicate results, or non-finite percentages.</p>
+                @if (comparison.Snapshot.IsPublishedHistory)
+                {
+                    <p class="coverage-note">Exact timestamp and runtime/performance SHA match.
+                        Published values may be rounded; build number, sample counts, and partition coverage are unavailable.
+                        These results do not establish statistical significance.</p>
+                }
 
                 @if (ranking.Rows.Length == 0)
                 {
@@ -364,14 +370,7 @@
     };
     private static string ChartLabel(RankedBenchmark row, int position) =>
         $"#{position + 1}: {row.Identity.DisplayName}, {Percent(row.SlowdownPercent)} slower";
-    private static string LaneName(string id) => id switch
-    {
-        "mono-interpreter" => "Mono interpreter",
-        "mono-aot" => "Mono AOT",
-        "coreclr-interpreter" => "CoreCLR interpreter",
-        "coreclr-r2r" => "CoreCLR R2R",
-        _ => throw new ArgumentException("Unknown runtime configuration.", nameof(id))
-    };
+    private static string LaneName(string id) => BuildComparison.DisplayName(id);
 
     private sealed class RankingQuery
     {

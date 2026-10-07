@@ -61,7 +61,7 @@ public sealed class BuildComparisonTests
     [Fact]
     public void Summarize_UsesFourWayIntersectionAndLogGeomeanForAllSixPairs()
     {
-        var lanes = BuildComparison.LaneIds.Select((id, index) => Lane(id,
+        var lanes = BuildComparison.RequiredLaneIds.Select((id, index) => Lane(id,
             Measurement("one", index == 0 ? 8 : 2),
             Measurement("two", index == 0 ? 2 : 8),
             Measurement("extreme", index == 0 ? 1e250 : 1e249))).ToArray();
@@ -74,6 +74,51 @@ public sealed class BuildComparisonTests
         Assert.Equal(1, pairs[^1].GeometricMean!.Value, 10);
         var subset = BuildComparison.Summarize(rows.Where(row => row.Identity.Method == "one"));
         Assert.Equal(4, subset[0].GeometricMean!.Value, 10);
+    }
+
+    [Fact]
+    public void Analyze_SnapshotWithoutOptionalLaneUsesOnlyItsLanes()
+    {
+        var snapshot = Snapshot(BuildComparison.RequiredLaneIds
+            .Select(id => Lane(id, Measurement("one", 1))).ToArray());
+
+        var result = BuildComparison.Analyze(snapshot);
+
+        Assert.Equal(BuildComparison.RequiredLaneIds, result.LaneIds);
+        Assert.Equal(BuildComparison.RequiredLaneIds, result.Coverage.Select(value => value.LaneId));
+        Assert.True(Assert.Single(result.Rows).IsCommon);
+        Assert.Equal(6, BuildComparison.Summarize(result.Rows, result.LaneIds).Length);
+    }
+
+    [Fact]
+    public void Analyze_SnapshotWithCompositeLaneIncludesItInTheIntersection()
+    {
+        var snapshot = Snapshot(BuildComparison.LaneIds
+            .Select(id => Lane(id, Measurement("one", 1),
+                Measurement("two", 1)))
+            .Select(lane => lane.Provenance.Id == BuildComparison.CoreClrR2RComposite
+                ? Lane(lane.Provenance.Id, Measurement("one", 1)) : lane)
+            .ToArray());
+
+        var result = BuildComparison.Analyze(snapshot);
+
+        Assert.Equal(BuildComparison.LaneIds, result.LaneIds);
+        Assert.Equal("one", Assert.Single(result.Common).Identity.Method);
+        Assert.Equal(10, BuildComparison.Summarize(result.Rows, result.LaneIds).Length);
+    }
+
+    [Theory]
+    [InlineData("coreclr-r2r", "missing coreclr-r2r")]
+    [InlineData("unknown-lane", "Unknown Wasm runtime lanes")]
+    public void Validate_RequiresCoreLanesAndRejectsUnknownLanes(string laneId, string message)
+    {
+        var lanes = laneId == "unknown-lane"
+            ? [.. BuildComparison.RequiredLaneIds.Select(id => Lane(id)), Lane(laneId)]
+            : BuildComparison.RequiredLaneIds.Where(id => id != laneId).Select(id => Lane(id)).ToArray();
+
+        var exception = Assert.Throws<InvalidDataException>(() => BuildComparison.Validate(Snapshot(lanes)));
+
+        Assert.Contains(message, exception.Message);
     }
 
     [Fact]

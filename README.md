@@ -17,7 +17,7 @@ dotnet run --project src/WasmBenchmarkHistory
 ```
 
 Open the URL printed by ASP.NET Core, search for a benchmark, select two to
-four available run configurations, and choose **Compare histories**. The chart
+five available run configurations, and choose **Compare histories**. The chart
 can show complete raw histories or normalize strict matched observations to the
 first selected run. Hover the chart to inspect the nearest timestamp, or focus
 it and use the left/right arrow, Home, and End keys. The detail card reports
@@ -98,7 +98,7 @@ investigation run, summary method, and exact A/B identities are encoded in the
 query string. Reloading or sharing the URL restores valid state; malformed,
 unavailable, or ambiguous fields are ignored with an on-page explanation.
 
-All four Wasm configurations, including CoreCLR R2R, use public
+The four core Wasm configurations, including CoreCLR R2R, use public
 `allTestHistory` indexes and generated benchmark-history pages as their primary
 source. Installed direct Helix snapshots augment the catalog and history chart
 only as an offline fallback for benchmarks already present in the corresponding
@@ -108,6 +108,16 @@ Published histories merge fallback points by the existing strict key
 wins, while a value or duplicate-cardinality conflict is surfaced instead of
 silently selecting one. The **CoreCLR Wasm R2R** public index is
 `CompilationMode=wasm_R2RType=r2r_RunKind=micro_RuntimeType=coreclr`.
+
+**CoreCLR Wasm R2R composite** (added by dotnet/performance#5324, pipeline job
+`coreclr_r2r_composite_v8`, `R2RType=r2r_composite`) is an *optional* run
+configuration using the
+`CompilationMode=wasm_R2RType=r2r_composite_RunKind=micro_RuntimeType=coreclr`
+index. Until that index is published, a 404 is treated as "no results yet": the
+catalog still loads, the run is shown as **No published results yet**, and it
+does not count against "shared by all runs". Once any benchmark has composite
+data (published or from a direct snapshot) it becomes an expected run. Any other
+index failure, and any failure for the four core runs, still fails the catalog.
 Fallback-only points use diamond markers and dashed gap-aware guides, retain
 their snapshot/build provenance in the hover card, and never replace or
 interpolate published observations. Rolling variability still requires the
@@ -208,17 +218,28 @@ unsupported runs, and exact-match failures are surfaced as errors.
 ### Compare builds
 
 Open **Compare builds** (`/compare-builds`) to compare imported results
-for Mono interpreter, Mono AOT, CoreCLR interpreter, and CoreCLR R2R. This view
+for Mono interpreter, Mono AOT, CoreCLR interpreter, CoreCLR R2R, and (when
+the build ran it) CoreCLR R2R composite. This view
 does not depend on public historical indexes having a ReadyToRun lane. It keeps
 same-build calculations separate from earlier one-iteration ColdStart
 experiments. Sanitized snapshot observations also augment the historical chart
 through its existing strict matching model.
 
+The build selector also accepts **Published-history snapshots**. These use the
+exact public observation identity (timestamp, full runtime SHA, full performance
+SHA), not a guessed Azure DevOps build number. Their stable IDs start with
+`published-`; the UI labels their source and timestamp. They contain primary
+published values and error bars only. Sample counts, error-bar semantics,
+partition completeness, and full BDN statistics remain unavailable. They can
+drive both Compare builds and Slowdown ranking, but never enter the verified
+direct-history archive or masquerade as direct Helix observations.
+
 The coverage table accounts for the union of benchmark identities. Full BDN
 reports use their structured namespace/type/method/parameter identity; combined
 perf-lab reports use their exact canonical test name without heuristic
-rewriting. The six
-pairwise geometric means all use the **same four-way common set**, excluding
+rewriting. The
+pairwise geometric means (six for four lanes, ten when the composite lane is
+present) all use the **same all-lane common set**, excluding
 missing, invalid, and duplicate identities. Identity never uses a BDN job ID.
 Multiple reports for an
 identity are flagged as duplicates, even if their means agree; no arbitrary
@@ -409,8 +430,9 @@ uniform configuration.
 ### Refresh from an internal build
 
 The application includes a dependency-light acquisition command. It validates
-the internal build host, pipeline definition/name, main branch, four expected
-Wasm job names, Helix GUIDs, partition names, report hosts, report shapes, commit
+the internal build host, pipeline definition/name, main branch, four required
+Wasm job names (plus the optional `coreclr_r2r_composite_v8` job when the build
+has it), Helix GUIDs, partition names, report hosts, report shapes, commit
 SHAs, and output extension. It downloads only combined perf-lab or full BDN JSON
 result artifacts and feeds them through the same allowlisted importer used by
 the checked-in snapshots:
@@ -441,6 +463,47 @@ The exporter prints per-lane coverage and the six common-set speedups.
 and contribute exact direct observations to the main benchmark explorer.
 Refresh remains a manual maintainer operation after a successful build; this is
 not an automatic replacement for the public allTestHistory pipeline.
+
+### Generate a snapshot from public histories
+
+No internal credentials or ADX access are required. Choose an exact observation
+identity from the public histories, then run:
+
+```bash
+dotnet run --project src/WasmBenchmarkHistory -- \
+  --acquire-published-snapshot '2026-10-06 09:38:57' \
+  7ede41e0cbfd6d7d2fbabb66ede45118f076c6af \
+  de35ca24c8ca1417d24197dc031bf73d1134adf7 \
+  /absolute/repo/src/WasmBenchmarkHistory/DataSets
+```
+
+The timestamp uses the public report's `yyyy-MM-dd HH:mm:ss` representation;
+no time-zone conversion or nearest-date matching is performed. The command
+fetches all benchmark pages in each published run's index with eight concurrent
+requests. It can take substantially longer than comparing an existing snapshot.
+Progress and per-run match counts are printed. Matching observations are cached
+under the OS local application-data directory's
+`wasm-benchmark-history/published-snapshots`, so interrupted acquisition can
+resume. Empty matches are not cached, allowing subsequent publication to be
+picked up. A failed download or malformed report fails acquisition rather than
+silently omitting coverage.
+
+Non-finite numeric points are retained as explicit invalid measurements for this
+export only; the interactive history parser remains strict by default. Exact
+duplicate observations remain duplicates. The command requires usable composite
+R2R data and at least one all-runtime match before writing an atomic gzip snapshot.
+Schema version 2 distinguishes these public snapshots from schema version 1
+direct snapshots; no sample count, standard error, or partition inventory is
+invented. Restart/rebuild the server to pick up a newly generated file, or
+rebuild/publish the standalone WASM app to ship it and its generated manifest.
+
+The bundled October 6, 2026 snapshot above covers **5,697** benchmark identities,
+with **4,233** valid five-runtime matches. Composite R2R has **5,651** published
+observations (**5,648** valid). Its gzip payload is about 596 KB. The source
+does not expose an independently verified build number, so the selector uses
+the published timestamp rather than guessing one from a history trace label.
+
+### Refresh retained direct history
 
 To refresh the retained multi-build series and keep reusable full sanitized run
 data outside the repository:
@@ -543,8 +606,11 @@ manifest shape is:
 }
 ```
 
-Supply all four lane IDs: `mono-interpreter`, `mono-aot`,
-`coreclr-interpreter`, `coreclr-r2r`. Every lane must declare identical build
+Supply all four required lane IDs: `mono-interpreter`, `mono-aot`,
+`coreclr-interpreter`, `coreclr-r2r`. The `coreclr-r2r-composite` lane is
+optional; builds that predate it omit it. When building retained direct history,
+an incomplete composite lane is dropped from that build instead of excluding the
+whole build. Every lane must declare identical build
 provenance (including both full SHAs). Report paths are relative to and must
 remain inside the manifest directory. Enumerate every acquired partition;
 missing partitions remain visible against `expectedPartitions`, and partitions
@@ -579,8 +645,8 @@ running the app does not.
   local and sends one completed range to the server.
 - `Components/RegressionInvestigationPanel.razor` keeps within-run temporal
   analysis visually and semantically separate from strict runtime comparison.
-- `Data/BenchmarkIndexParser.cs` catalogs links from the four published index
-  pages. `DirectSnapshotHistory.cs` adds valid fallback snapshot identities and
+- `Data/BenchmarkIndexParser.cs` catalogs links from the published index
+  pages (four required, plus the optional composite R2R index). `DirectSnapshotHistory.cs` adds valid fallback snapshot identities and
   merges exact observations only after a benchmark is selected.
 - `Data/BenchmarkHistoryParser.cs` extracts the `defaultCounter` primary trace
   from generated JavaScript as text. It never evaluates downloaded JavaScript.
@@ -601,7 +667,8 @@ running the app does not.
   IQR bands locally from primary-series values.
 - `Data/CachedPageClient.cs` and `DiskPageCache.cs` provide bounded-refresh
   local caching with stale-cache fallback during network failures.
-- `Data/DirectRunAcquirer.cs` discovers the four AzDO/Helix lanes, validates
+- `Data/DirectRunAcquirer.cs` discovers the four required AzDO/Helix lanes
+  and the optional composite R2R lane, validates
   authenticated result artifacts, and keeps its raw cache outside the repo.
 - `Data/DirectHistoryArchive.cs` projects retained compact history from full
   sanitized snapshots, enforces completeness/retention, and exposes the bundled
@@ -610,7 +677,7 @@ running the app does not.
   statistics and exact identity into compressed same-build snapshots;
   `BuildComparison.cs` accounts for coverage and calculates strict common-set
   speedups.
-- `Components/Pages/CompareBuilds.razor` presents the four-runtime snapshot
+- `Components/Pages/CompareBuilds.razor` presents the all-runtime snapshot
   comparison independently of the historical data source.
 - `WasmBenchmarkHistory.Core/BenchmarkRanking.cs` filters and ranks valid
   same-build pairs. `Components/Pages/SlowdownRanking.razor` presents the results;

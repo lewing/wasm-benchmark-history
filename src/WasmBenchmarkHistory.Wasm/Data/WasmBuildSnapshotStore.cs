@@ -31,9 +31,10 @@ public sealed class WasmBuildSnapshotStore(HttpClient http) : IBuildSnapshotStor
                 snapshot.Build.BuildId,
                 snapshot.Build.BuildNumber,
                 snapshot.CaptureSource,
-                snapshot.CapturedAt));
+                snapshot.CapturedAt,
+                snapshot.Build.SourceDate));
         }
-        return descriptors.ToArray();
+        return BuildSnapshotStoreOrdering.OrderDescriptors(descriptors);
     }
 
     public async Task<BuildSnapshot> LoadAsync(string buildId)

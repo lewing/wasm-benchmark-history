@@ -29,6 +29,41 @@ public sealed class BenchmarkCatalogTests
     }
 
     [Fact]
+    public void OptionalRunWithoutDataIsNotExpectedForSharedAvailability()
+    {
+        var pages = KnownRunConfigurations.Required.ToDictionary(
+            run => run.Id, run => new Uri(run.IndexUri!, "N.T.Run.html"));
+
+        var catalog = new BenchmarkCatalog([new("N.T.Run", pages)]);
+
+        var entry = Assert.Single(catalog.Entries);
+        Assert.Equal(KnownRunConfigurations.Required, catalog.ActiveRuns);
+        Assert.True(entry.IsShared);
+        Assert.Equal("Shared by all runs", entry.Availability);
+        Assert.Equal(4, entry.ExpectedRunCount);
+    }
+
+    [Fact]
+    public void OptionalRunWithDataBecomesExpected()
+    {
+        var composite = KnownRunConfigurations.Get("coreclr-wasm-r2r-composite");
+        var required = KnownRunConfigurations.Required.ToDictionary(
+            run => run.Id, run => new Uri(run.IndexUri!, "N.T.Run.html"));
+        var all = new Dictionary<string, Uri>(required)
+        {
+            [composite.Id] = new Uri(composite.IndexUri!, "N.T.Run.html")
+        };
+
+        var catalog = new BenchmarkCatalog([new("N.T.Run", required), new("N.T.Other", all)]);
+
+        Assert.Equal(KnownRunConfigurations.All, catalog.ActiveRuns);
+        var missing = catalog.Find("N.T.Run")!;
+        Assert.False(missing.IsShared);
+        Assert.Equal("Missing: CoreCLR Wasm R2R composite", missing.Availability);
+        Assert.True(catalog.Find("N.T.Other")!.IsShared);
+    }
+
+    [Fact]
     public void Constructor_BuildsNamespaceAndTypeCategoryTree()
     {
         var catalog = new BenchmarkCatalog(

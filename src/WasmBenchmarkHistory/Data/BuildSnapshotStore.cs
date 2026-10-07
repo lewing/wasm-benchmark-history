@@ -34,8 +34,9 @@ public sealed class BuildSnapshotStore(IWebHostEnvironment environment) : IBuild
                 snapshot.Build.BuildId,
                 snapshot.Build.BuildNumber,
                 snapshot.CaptureSource,
-                snapshot.CapturedAt));
+                snapshot.CapturedAt,
+                snapshot.Build.SourceDate));
         }
-        return descriptors.ToArray();
+        return BuildSnapshotStoreOrdering.OrderDescriptors(descriptors);
     }
 }

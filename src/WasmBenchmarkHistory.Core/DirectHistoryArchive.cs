@@ -56,6 +56,13 @@ public static class DirectHistoryArchiveBuilder
                 JsonSerializer.Serialize(canonical, BuildSnapshotImporter.JsonOptions)))
                 throw new InvalidDataException($"Build {group.Key} has conflicting full snapshots.");
             var selected = candidates.OrderByDescending(candidate => candidate.CapturedAt).First();
+            // An unusable optional lane (e.g. a newly added configuration still failing) drops only that
+            // lane, so it never excludes an otherwise complete build.
+            selected = selected with
+            {
+                Lanes = selected.Lanes.Where(lane =>
+                    !BuildComparison.IsOptional(lane.Id) || GetIncompleteReason(lane) is null).ToArray()
+            };
             var incomplete = GetIncompleteReason(selected);
             if (incomplete is not null)
                 exclusions.Add(new(group.Key, incomplete));
@@ -128,10 +135,8 @@ public static class DirectHistoryArchiveBuilder
                 string.IsNullOrWhiteSpace(build.CaptureSource))
                 throw new InvalidDataException("Direct history build provenance is incomplete.");
             _ = Timestamp(build.Build);
-            if (build.Lanes.Length != BuildComparison.LaneIds.Length ||
-                !build.Lanes.Select(lane => lane.Id).Order(StringComparer.Ordinal)
-                    .SequenceEqual(BuildComparison.LaneIds.Order(StringComparer.Ordinal)))
-                throw new InvalidDataException($"Build {build.Build.BuildId} does not contain all four lanes.");
+            if (BuildComparison.LaneSetError(build.Lanes.Select(lane => lane.Id).ToArray()) is { } laneError)
+                throw new InvalidDataException($"Build {build.Build.BuildId}: {laneError}");
             foreach (var lane in build.Lanes)
             {
                 if (lane.ExpectedPartitions <= 0 ||
@@ -155,6 +160,8 @@ public static class DirectHistoryArchiveBuilder
     private static DirectHistoryBuild Project(BuildSnapshot snapshot)
     {
         BuildComparison.Validate(snapshot);
+        if (snapshot.IsPublishedHistory)
+            throw new InvalidDataException("Published-history snapshots cannot enter the verified direct-history archive.");
         return new DirectHistoryBuild(
             snapshot.Build,
             snapshot.CaptureSource,
@@ -179,19 +186,19 @@ public static class DirectHistoryArchiveBuilder
                 .ToArray());
     }
 
-    public static string? GetIncompleteReason(DirectHistoryBuild build)
+    public static string? GetIncompleteReason(DirectHistoryBuild build) =>
+        build.Lanes.Select(GetIncompleteReason).FirstOrDefault(reason => reason is not null);
+
+    public static string? GetIncompleteReason(DirectHistoryLane lane)
     {
-        foreach (var lane in build.Lanes)
-        {
-            if (lane.Partitions.Length != lane.ExpectedPartitions)
-                return $"{lane.Id} has {lane.Partitions.Length}/{lane.ExpectedPartitions} partitions.";
-            var missing = lane.Partitions.Where(partition =>
-                partition.Reports <= 0 || partition.Measurements <= 0).ToArray();
-            if (missing.Length > 0)
-                return $"{lane.Id} has {missing.Length} partitions without usable reports.";
-            if (!lane.Measurements.Any(measurement => measurement.InvalidReason is null))
-                return $"{lane.Id} has no valid measurements.";
-        }
+        if (lane.Partitions.Length != lane.ExpectedPartitions)
+            return $"{lane.Id} has {lane.Partitions.Length}/{lane.ExpectedPartitions} partitions.";
+        var missing = lane.Partitions.Where(partition =>
+            partition.Reports <= 0 || partition.Measurements <= 0).ToArray();
+        if (missing.Length > 0)
+            return $"{lane.Id} has {missing.Length} partitions without usable reports.";
+        if (!lane.Measurements.Any(measurement => measurement.InvalidReason is null))
+            return $"{lane.Id} has no valid measurements.";
         return null;
     }
 
@@ -229,12 +236,20 @@ public sealed record DirectHistoryTrendRow(
 
 public static class DirectHistoryTrend
 {
+    // Lanes present in at least one retained build, in canonical order.
+    public static string[] LaneIds(DirectHistoryArchive archive) =>
+        BuildComparison.Canonical(archive.Builds.SelectMany(build => build.Lanes).Select(lane => lane.Id));
+
     public static DirectHistoryTrendRow[] Create(DirectHistoryArchive archive, string benchmark)
     {
+        var laneIds = LaneIds(archive);
         var rows = archive.Builds.Select(build =>
         {
-            var cells = build.Lanes.ToDictionary(lane => lane.Id, lane =>
+            var cells = laneIds.ToDictionary(id => id, id =>
             {
+                var lane = build.Lanes.SingleOrDefault(value => value.Id == id);
+                if (lane is null)
+                    return new DirectHistoryTrendCell("not run", null, null, null, null, null, null);
                 var matches = lane.Measurements.Where(value =>
                     value.Identity.DisplayName == benchmark).ToArray();
                 return matches.Length switch
@@ -261,7 +276,7 @@ public static class DirectHistoryTrend
         for (var index = 0; index < rows.Length; index++)
         {
             var cells = new Dictionary<string, DirectHistoryTrendCell>(StringComparer.Ordinal);
-            foreach (var laneId in BuildComparison.LaneIds)
+            foreach (var laneId in laneIds)
             {
                 var current = rows[index].Cells[laneId];
                 var previous = index == 0 ? null : rows[index - 1].Cells[laneId];

@@ -100,9 +100,7 @@ else
                                     @onclick="() => SelectBenchmark(item.Entry)">
                                 <span class="result-name">@GetBenchmarkLabel(item)</span>
                                 <span class="availability @(item.Entry.IsShared ? "shared" : "partial")">
-                                    @(item.Entry.IsShared
-                                        ? $"{KnownRunConfigurations.All.Count}/{KnownRunConfigurations.All.Count}"
-                                        : $"{item.Entry.AvailableRunCount}/{KnownRunConfigurations.All.Count}")
+                                    @($"{item.Entry.AvailableRunCount}/{item.Entry.ExpectedRunCount}")
                                 </span>
                             </button>
                         }
@@ -116,7 +114,7 @@ else
         </div>
 
         <div class="run-area">
-            <label>2. Choose 2–4 run configurations</label>
+            <label>2. Choose 2–@KnownRunConfigurations.All.Count run configurations</label>
             <div class="run-options">
                 @foreach (var run in KnownRunConfigurations.All)
                 {
@@ -129,7 +127,9 @@ else
                         <span class="series-swatch" style="background:@run.Color"></span>
                         <span>
                             <strong>@run.DisplayName</strong>
-                            <small>@(available ? run.Description : "Not available for this benchmark")</small>
+                            <small>@(available ? run.Description
+                                : _catalog?.ActiveRuns.Contains(run) == false ? "No published results yet"
+                                : "Not available for this benchmark")</small>
                         </span>
                     </label>
                 }
@@ -392,7 +392,8 @@ else
 
     private bool CanLoad =>
         _selectedBenchmark is not null
-        && _selectedRunIds.Count is >= 2 and <= 4
+        && _selectedRunIds.Count >= 2
+        && _selectedRunIds.Count <= KnownRunConfigurations.All.Count
         && !_isLoadingHistories;
 
     private int DirectObservationCount => _histories.Sum(history =>
