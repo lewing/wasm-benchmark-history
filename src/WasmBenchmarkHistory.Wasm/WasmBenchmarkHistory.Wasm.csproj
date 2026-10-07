@@ -19,6 +19,8 @@
   <ItemGroup>
     <Content Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor" Link="Pages\SlowdownRanking.razor" />
     <None Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor.css" Link="Pages\SlowdownRanking.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\wwwroot\slowdown-ranking-download.js"
+             Link="wwwroot\slowdown-ranking-download.js" />
   </ItemGroup>
 
   <!--

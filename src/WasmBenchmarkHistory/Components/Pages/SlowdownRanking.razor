@@ -1,6 +1,7 @@
 @page "/slowdown-ranking"
 @using System.ComponentModel.DataAnnotations
 @inject IBuildSnapshotStore Store
+@inject IJSRuntime JS
 
 <PageTitle>Slowdown ranking</PageTitle>
 
@@ -86,8 +87,11 @@
                         <h2>@LaneName(_candidate) <span>vs</span> @LaneName(_baseline)</h2>
                         <p>@comparison.Snapshot.DisplayLabel · @comparison.Snapshot.CaptureSource</p>
                     </div>
-                    <span class="result-count" role="status">Showing @ranking.Rows.Length of @ranking.SlowerCount.ToString("N0")
-                        @(HasFilter ? "matching slower benchmarks" : "slower benchmarks")</span>
+                    <div class="result-actions">
+                        <span class="result-count" role="status">Showing @ranking.Rows.Length of @ranking.SlowerCount.ToString("N0")
+                            @(HasFilter ? "matching slower benchmarks" : "slower benchmarks")</span>
+                        <button class="export-button" type="button" @onclick="ExportMarkdownAsync">Export .md</button>
+                    </div>
                 </div>
 
                 <div class="summary-cards">
@@ -236,6 +240,8 @@
     private int _selected;
     private double Maximum => _ranking!.Rows[0].SlowdownPercent;
     private string ScaleLabel => _logScale ? "a log scale: log10(1 + slowdown %)" : "a linear scale";
+    private string ExportFileName => SlowdownRankingMarkdown.FileName(
+        _comparison!.Snapshot.Build.BuildId, _candidate, _baseline);
 
     protected override async Task OnInitializedAsync()
     {
@@ -327,6 +333,30 @@
         if (position >= 0)
             _selected = position;
     }
+
+    private async Task ExportMarkdownAsync()
+    {
+        if (_comparison is null || _ranking is null)
+            return;
+
+        try
+        {
+            var markdown = SlowdownRankingMarkdown.Create(
+                _comparison, _ranking, _candidate, _baseline, FilterText);
+            await using var module = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./slowdown-ranking-download.js");
+            await module.InvokeVoidAsync("download", ExportFileName, markdown);
+        }
+        catch (JSException exception)
+        {
+            _error = $"Could not export Markdown: {exception.Message}";
+        }
+        catch (OperationCanceledException)
+        {
+            _error = "Could not export Markdown because the download was interrupted.";
+        }
+    }
+
     private string SelectedClass(int position) => _selected == position ? "selected" : "";
     private string BarSize(RankedBenchmark row) =>
         ((_logScale ? Math.Log10(1 + row.SlowdownPercent) / Math.Log10(1 + Maximum)
