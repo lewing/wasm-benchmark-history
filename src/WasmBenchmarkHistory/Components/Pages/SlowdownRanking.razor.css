@@ -38,7 +38,11 @@ button:disabled { cursor: wait; opacity: .5; }
 .result-heading { align-items: center; display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between; margin: 1.6rem 0 1rem; }
 .result-heading h2 span { color: var(--muted); font-size: .8rem; font-weight: 400; margin: 0 .4rem; }
 .result-heading p { color: var(--muted); font-size: .72rem; margin-top: .45rem; }
+.result-actions { align-items: center; display: flex; flex-wrap: wrap; gap: .6rem; justify-content: end; }
 .result-count { background: var(--highlight-soft); border: 1px solid var(--line); border-radius: 20px; color: var(--highlight); font-size: .72rem; padding: .5rem .8rem; }
+.export-button { background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--highlight); cursor: pointer; font-size: .72rem; font-weight: 700; padding: .5rem .8rem; }
+.export-button:hover { background: var(--highlight-soft); }
+.export-button:focus-visible { outline: 2px solid var(--highlight); outline-offset: 2px; }
 .summary-cards { border-block: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); }
 .summary-cards > div { display: flex; flex-wrap: wrap; gap: .4rem .8rem; padding: .8rem 1rem; }
 .summary-cards span, .summary-cards small { color: var(--muted); display: block; font-size: .72rem; }

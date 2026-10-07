@@ -259,6 +259,8 @@ distinct configurations, and a positive integer result count, then select
 parameters) and categories as you type; for example, `json`. Matching is
 case-insensitive and ignores surrounding whitespace. Filtering happens before
 ranking and the result limit. The table, chart, and counts use the same filter.
+Select **Export .md** to download the current filtered ranking, summary counts,
+exact mean times, and slowdown percentages as a Markdown report.
 
 Slowdown is `(measured mean - reference mean) / reference mean * 100`.
 100% slower means twice the reference time. Only positive slowdowns are listed,
