@@ -1,9 +1,9 @@
 @if (_series.Count > 0)
 {
-    <section class="variability-analysis" aria-labelledby="variability-analysis-title">
+    <section class="variability-analysis" aria-labelledby="@_titleId">
         <header>
             <div>
-                <strong id="variability-analysis-title">Aligned variability analysis</strong>
+                <strong id="@_titleId">Aligned variability analysis</strong>
                 <span>
                     Each runtime keeps a linear value axis; all panels share the history timeline.
                 </span>
@@ -203,6 +203,7 @@
     private const double MiniPlotWidth = 876;
     private const double MiniPlotHeight = 105;
     private const double VolatilityPlotHeight = 130;
+    private readonly string _titleId = $"variability-{Guid.NewGuid():N}";
 
     [Parameter, EditorRequired]
     public IReadOnlyList<BenchmarkHistory> Histories { get; set; } = [];
@@ -217,22 +218,26 @@
     public HistoryTimeRange TimeRange { get; set; } = HistoryTimeRange.All;
 
     [Parameter]
+    public (DateTime Start, DateTime End)? TimelineBounds { get; set; }
+
+    [Parameter]
     public int Window { get; set; } = RollingVariabilityCalculator.DefaultWindow;
 
     [Parameter]
     public DateTime? PinnedTimestamp { get; set; }
 
     [Parameter]
-    public string? FocusedRunId { get; set; }
+    public IReadOnlyCollection<string>? FocusedRunIds { get; set; }
 
     private IReadOnlyList<PanelSeries> _series = [];
     private IReadOnlyList<BenchmarkHistory>? _lastHistories;
     private IReadOnlyList<MatchedComparison>? _lastMatches;
     private bool _lastNormalized;
     private HistoryTimeRange? _lastTimeRange;
+    private (DateTime Start, DateTime End)? _lastTimelineBounds;
     private int _lastWindow;
     private DateTime? _lastPinnedTimestamp;
-    private string? _lastFocusedRunId;
+    private string _lastFocusKey = "";
     private long _minTicks;
     private long _maxTicks;
     private bool _shouldRender = true;
@@ -257,8 +262,9 @@
             || !ReferenceEquals(_lastMatches, Matches)
             || _lastNormalized != Normalized
             || _lastTimeRange != TimeRange
+            || _lastTimelineBounds != TimelineBounds
             || _lastWindow != Window
-            || _lastFocusedRunId != FocusedRunId;
+            || _lastFocusKey != FocusKey;
         var pinChanged = _lastPinnedTimestamp != PinnedTimestamp;
         _shouldRender = _lastHistories is null || dataChanged || pinChanged;
 
@@ -271,9 +277,10 @@
         _lastMatches = Matches;
         _lastNormalized = Normalized;
         _lastTimeRange = TimeRange;
+        _lastTimelineBounds = TimelineBounds;
         _lastWindow = Window;
         _lastPinnedTimestamp = PinnedTimestamp;
-        _lastFocusedRunId = FocusedRunId;
+        _lastFocusKey = FocusKey;
     }
 
     protected override bool ShouldRender() => _shouldRender;
@@ -290,8 +297,8 @@
             return;
         }
 
-        var availableMinimum = allTimestamps.Min();
-        var availableMaximum = allTimestamps.Max();
+        var availableMinimum = TimelineBounds?.Start ?? allTimestamps.Min();
+        var availableMaximum = TimelineBounds?.End ?? allTimestamps.Max();
         var visibleRange = TimeRange.Resolve(availableMinimum, availableMaximum);
 
         if (!Normalized)
@@ -346,10 +353,10 @@
             .SelectMany(series => series.Points)
             .Select(point => point.Timestamp.Ticks)
             .ToArray();
-        _minTicks = visibleTimestamps.Length == 0
+        _minTicks = TimelineBounds is not null || visibleTimestamps.Length == 0
             ? fallbackRange.Start.Ticks
             : visibleTimestamps.Min();
-        _maxTicks = visibleTimestamps.Length == 0
+        _maxTicks = TimelineBounds is not null || visibleTimestamps.Length == 0
             ? fallbackRange.End.Ticks
             : visibleTimestamps.Max();
         if (_maxTicks == _minTicks)
@@ -509,11 +516,14 @@
             : "—";
 
     private string SeriesFocusClass(string runId) =>
-        FocusedRunId is null
+        FocusedRunIds is not { Count: > 0 }
             ? ""
-            : string.Equals(FocusedRunId, runId, StringComparison.Ordinal)
+            : FocusedRunIds.Contains(runId)
                 ? "is-focused"
                 : "is-dimmed";
+
+    private string FocusKey =>
+        FocusedRunIds is null ? "" : string.Join(',', FocusedRunIds.Order(StringComparer.Ordinal));
 
     private static string PanelAccessibleLabel(PanelSeries series) =>
         series.HasDirectSnapshots

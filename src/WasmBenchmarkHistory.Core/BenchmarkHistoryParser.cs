@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace WasmBenchmarkHistory.Data;
@@ -11,6 +12,11 @@ public sealed class BenchmarkHistoryParser
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
+    private static readonly Regex TableDataPattern = new(
+        @"\b(?:const|let|var)\s+tableData\s*=\s*",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
     public BenchmarkHistory Parse(
         string benchmark, RunConfiguration run, string html, bool preserveInvalidMeasurements = false)
     {
@@ -18,18 +24,12 @@ public sealed class BenchmarkHistoryParser
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(html);
 
-        var counterMatch = DefaultCounterPattern.Match(html);
-        if (!counterMatch.Success)
-        {
-            throw SchemaError(benchmark, "defaultCounter was not found.");
-        }
-
-        var counterId = counterMatch.Groups["id"].Value;
+        var (counterId, searchStart) = FindDefaultCounter(html, benchmark);
         var assignmentPattern = new Regex(
             $@"\btrendData\s*\[\s*{Regex.Escape(counterId)}\s*\]\s*=",
             RegexOptions.CultureInvariant,
             TimeSpan.FromSeconds(2));
-        var assignment = assignmentPattern.Match(html, counterMatch.Index + counterMatch.Length);
+        var assignment = assignmentPattern.Match(html, searchStart);
         if (!assignment.Success)
         {
             throw SchemaError(benchmark, $"trendData[{counterId}] was not found.");
@@ -117,6 +117,78 @@ public sealed class BenchmarkHistoryParser
         }
 
         return new BenchmarkHistory(benchmark, run, traceName, observations);
+    }
+
+    private static (string Id, int SearchStart) FindDefaultCounter(string html, string benchmark)
+    {
+        var legacy = DefaultCounterPattern.Match(html);
+        if (legacy.Success)
+        {
+            return (legacy.Groups["id"].Value, legacy.Index + legacy.Length);
+        }
+
+        var table = TableDataPattern.Match(html);
+        if (!table.Success)
+        {
+            throw SchemaError(benchmark, "defaultCounter was not found.");
+        }
+
+        var start = SkipWhitespace(html, table.Index + table.Length);
+        if (start >= html.Length || html[start] != '{')
+        {
+            throw SchemaError(benchmark, "tableData was not an object.");
+        }
+
+        var tableJson = ExtractDelimited(html, start, '{', '}', benchmark);
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(tableJson);
+        }
+        catch (JsonException)
+        {
+            throw SchemaError(benchmark, "tableData was not valid JSON.");
+        }
+
+        using (document)
+        {
+            string? counterId = null;
+            foreach (var category in new[] { "Regressions", "Improvements", "Unchanged" })
+            {
+                if (!document.RootElement.TryGetProperty(category, out var rows)
+                    || rows.ValueKind != JsonValueKind.Array)
+                {
+                    throw SchemaError(benchmark, $"tableData.{category} was not an array.");
+                }
+
+                foreach (var row in rows.EnumerateArray())
+                {
+                    if (row.ValueKind != JsonValueKind.Object
+                        || !row.TryGetProperty("defaultCounter", out var counter)
+                        || counter.ValueKind != JsonValueKind.Object
+                        || !counter.TryGetProperty("counterId", out var id)
+                        || id.ValueKind != JsonValueKind.Number)
+                    {
+                        throw SchemaError(benchmark, "tableData defaultCounter had no numeric counterId.");
+                    }
+
+                    var rawId = id.GetRawText();
+                    if (!rawId.All(char.IsAsciiDigit))
+                    {
+                        throw SchemaError(benchmark, "tableData counterId was not an unsigned integer.");
+                    }
+
+                    if (counterId is not null && counterId != rawId)
+                    {
+                        throw SchemaError(benchmark, "tableData contained multiple default counters.");
+                    }
+                    counterId = rawId;
+                }
+            }
+
+            return (counterId ?? throw SchemaError(benchmark, "defaultCounter was not found."),
+                start + tableJson.Length);
+        }
     }
 
     private static string ExtractArray(string source, string property, string benchmark)

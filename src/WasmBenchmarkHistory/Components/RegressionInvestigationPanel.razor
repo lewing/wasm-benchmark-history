@@ -1,193 +1,110 @@
-<section class="investigation-panel" aria-labelledby="investigation-title">
+<section class="investigation-panel" aria-labelledby="@_titleId">
     <div class="investigation-heading">
         <div>
-            <p class="eyebrow">WITHIN-RUN REGRESSION INVESTIGATION</p>
-            <h2 id="investigation-title">Pinned temporal change</h2>
+            <h2 id="@_titleId">A/B interval comparison</h2>
             <p>
-                @if (_history is not null)
-                {
-                    <span>Comparing two observations within <strong>@_history.Run.DisplayName</strong>.</span>
-                }
-                else
-                {
-                    <span>Pin A or B from a chart observation to choose one run.</span>
-                }
-                This is separate from strict cross-runtime matching.
+                Each selected benchmark and runtime is compared independently using its nearest raw samples
+                to the shared A and B timestamps. Sample dates and offsets are shown; values are never
+                compared across different benchmarks or runtimes.
             </p>
         </div>
         @if (BaselinePin is not null || ComparisonPin is not null)
         {
-            <button type="button" class="clear-all" @onclick="ClearAllAsync">Clear investigation</button>
+            <button type="button" class="clear-all" @onclick="ClearAllAsync">Clear A/B interval</button>
         }
     </div>
 
-    @if (_history is null)
+    @if (BaselinePin is null || ComparisonPin is null)
     {
         <div class="investigation-empty">
-            <strong>No investigation run selected.</strong>
-            <span>Open the chart detail card and choose <em>Set baseline A</em> or <em>Set comparison B</em> for a run.</span>
+            <strong>@(BaselinePin is null ? "Choose baseline A." : "Choose comparison B.")</strong>
+            <span>Pin a timestamp in any chart. A and B can come from different benchmarks and runtimes.</span>
         </div>
     }
     else
     {
-        <div class="pin-grid">
-            <article class="pin-card pin-a">
-                <header>
-                    <span>A</span>
-                    <strong>Baseline pin</strong>
-                    @if (BaselinePin is not null)
-                    {
-                        <button type="button" @onclick="() => ClearPinAsync(InvestigationPinSlot.BaselineA)">Clear A</button>
-                    }
-                </header>
-                @if (BaselinePin is null)
-                {
-                    <p class="missing-pin">Choose an observation from the chart detail card.</p>
-                }
-                else if (_baselineObservation is null)
-                {
-                    <p class="missing-pin error">The shared baseline pin is missing or ambiguous in this history.</p>
-                }
-                else
-                {
-                    @ObservationDetails(_baselineObservation)
-                }
-            </article>
-
-            <article class="pin-card pin-b">
-                <header>
-                    <span>B</span>
-                    <strong>Comparison pin</strong>
-                    @if (ComparisonPin is not null)
-                    {
-                        <button type="button" @onclick="() => ClearPinAsync(InvestigationPinSlot.ComparisonB)">Clear B</button>
-                    }
-                </header>
-                @if (ComparisonPin is null)
-                {
-                    <p class="missing-pin">Choose an observation from the chart detail card.</p>
-                }
-                else if (_comparisonObservation is null)
-                {
-                    <p class="missing-pin error">The shared comparison pin is missing or ambiguous in this history.</p>
-                }
-                else
-                {
-                    @ObservationDetails(_comparisonObservation)
-                }
-            </article>
+        <div class="interval-dates">
+            <span>
+                <strong>A</strong> @FormatTimestamp(BaselinePin.Identity.Timestamp)
+                <button type="button" @onclick="() => ClearPinAsync(InvestigationPinSlot.BaselineA)">Clear A</button>
+            </span>
+            <span>
+                <strong>B</strong> @FormatTimestamp(ComparisonPin.Identity.Timestamp)
+                <button type="button" @onclick="() => ClearPinAsync(InvestigationPinSlot.ComparisonB)">Clear B</button>
+            </span>
+            @if (BaselinePin.Identity.Timestamp == ComparisonPin.Identity.Timestamp)
+            {
+                <span class="interval-note">A and B are the same timestamp; choose distinct dates to compare a change.</span>
+            }
         </div>
 
-        @if (_analysis is not null)
+        <div class="summary-switch" role="group" aria-label="Interval comparison method">
+            <button type="button"
+                    class="@(!UseRobustSummary ? "active" : null)"
+                    aria-pressed="@(!UseRobustSummary ? "true" : "false")"
+                    @onclick="() => ChangeSummaryAsync(false)">
+                Nearest raw samples
+            </button>
+            <button type="button"
+                    class="@(UseRobustSummary ? "active" : null)"
+                    aria-pressed="@(UseRobustSummary ? "true" : "false")"
+                    @onclick="() => ChangeSummaryAsync(true)">
+                Robust 7-sample windows
+            </button>
+        </div>
+        @if (UseRobustSummary)
         {
-            <div class="chronology-note">
-                <strong>Older → newer:</strong>
-                <span>
-                    @SlotLabel(_analysis.Points.OlderSlot)
-                    (@_analysis.Points.Older.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))
-                    →
-                    @SlotLabel(Opposite(_analysis.Points.OlderSlot))
-                    (@_analysis.Points.Newer.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))
-                </span>
-                @if (_analysis.Points.PinsWereReordered)
-                {
-                    <em>A and B were selected in reverse chronological order and are presented older-first.</em>
-                }
-            </div>
-
-            <div class="summary-switch" role="group" aria-label="Investigation summary method">
-                <button type="button"
-                        class="@(!UseRobustSummary ? "active" : null)"
-                        aria-pressed="@(!UseRobustSummary)"
-                        @onclick="() => ChangeSummaryAsync(false)">
-                    Raw pinned points
-                </button>
-                <button type="button"
-                        class="@(UseRobustSummary ? "active" : null)"
-                        aria-pressed="@UseRobustSummary"
-                        @onclick="() => ChangeSummaryAsync(true)">
-                    Robust 7-observation windows
-                </button>
-            </div>
-
-            @if (UseRobustSummary)
-            {
-                <p class="method-note">
-                    Each pin uses up to seven observations (the pin ± three neighbors).
-                    Median and interpolated 25th/75th percentiles describe the window;
-                    no significance or p-value claim is made.
-                </p>
-                <div class="window-grid">
-                    @WindowDetails("Older window", _analysis.Windows.Older)
-                    @WindowDetails("Newer window", _analysis.Windows.Newer)
-                </div>
-            }
-
-            <div class="diff-metrics" aria-label="Regression difference">
-                <article>
-                    <span>Absolute delta</span>
-                    <strong>@FormatSigned(CurrentAbsoluteDelta)</strong>
-                    <small>newer − older</small>
-                </article>
-                <article>
-                    <span>Percent change</span>
-                    @if (CurrentPercentChange is null)
-                    {
-                        <strong>—</strong>
-                        <small>undefined: older value is zero</small>
-                    }
-                    else
-                    {
-                        <strong>@(CurrentPercentChange.Value.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) + "%")</strong>
-                        <small>@(CurrentPercentChange >= 0 ? "increase" : "decrease")</small>
-                    }
-                </article>
-                <article>
-                    <span>Ratio</span>
-                    @if (CurrentRatio is null)
-                    {
-                        <strong>—</strong>
-                        <small>undefined: older value is zero</small>
-                    }
-                    else
-                    {
-                        <strong>@CurrentRatio.Value.ToString("0.000×", CultureInfo.InvariantCulture)</strong>
-                        <small>newer ÷ older</small>
-                    }
-                </article>
-            </div>
-
-            <div class="compare-links">
-                <strong>Source comparisons</strong>
-                @if (_runtimeCompareUri is not null)
-                {
-                    <a href="@_runtimeCompareUri" target="_blank" rel="noopener noreferrer">
-                        dotnet/runtime compare <span aria-hidden="true">↗</span>
-                    </a>
-                }
-                else
-                {
-                    <span>Runtime compare unavailable (missing, invalid, or unchanged SHA).</span>
-                }
-                @if (_performanceCompareUri is not null)
-                {
-                    <a href="@_performanceCompareUri" target="_blank" rel="noopener noreferrer">
-                        dotnet/performance compare <span aria-hidden="true">↗</span>
-                    </a>
-                }
-                else
-                {
-                    <span>Performance compare unavailable (missing, invalid, or unchanged SHA).</span>
-                }
-            </div>
+            <p class="method-note">
+                Each endpoint uses up to seven observations around its nearest sample. Changes are computed
+                within a single benchmark/runtime row, older to newer; no significance or p-value claim is made.
+            </p>
         }
-        else if (BaselinePin is not null && ComparisonPin is not null)
-        {
-            <div class="investigation-error" role="alert">
-                The pinned observations could not be compared because one is missing or its exact
-                timestamp + runtime SHA + performance SHA identity is duplicated.
-            </div>
-        }
+
+        <div class="interval-table-scroll">
+            <table class="interval-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Benchmark</th>
+                        <th scope="col">Runtime</th>
+                        <th scope="col">A sample</th>
+                        <th scope="col">B sample</th>
+                        <th scope="col">Change, older → newer</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _rows)
+                    {
+                        <tr @key="(row.Benchmark, row.Run.Id)">
+                            <th scope="row" title="@row.Benchmark">@row.Benchmark</th>
+                            <td>@row.Run.DisplayName</td>
+                            @if (row.MissingHistory)
+                            {
+                                <td colspan="3" class="unavailable-sample">No history available for this benchmark/runtime.</td>
+                            }
+                            else
+                            {
+                                <td>@SampleDetails(row.AtA!)</td>
+                                <td>@SampleDetails(row.AtB!)</td>
+                                <td>
+                                    @if (row.Analysis is null)
+                                    {
+                                        <span class="unavailable-sample">Unavailable until both endpoints have a nearby sample.</span>
+                                    }
+                                    else
+                                    {
+                                        @ChangeDetails(row.Analysis)
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="tolerance-note">
+            A sample must be within three median observation intervals (at least 7 days, at most 30 days)
+            of its target. Ties are marked ambiguous rather than chosen arbitrarily.
+        </p>
     }
 </section>
 
@@ -196,7 +113,10 @@
     public IReadOnlyList<BenchmarkHistory> Histories { get; set; } = [];
 
     [Parameter]
-    public string? InvestigationRunId { get; set; }
+    public IReadOnlyList<string> Benchmarks { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyCollection<string> RunIds { get; set; } = [];
 
     [Parameter]
     public InvestigationPin? BaselinePin { get; set; }
@@ -216,105 +136,153 @@
     [Parameter]
     public EventCallback ClearAll { get; set; }
 
-    private BenchmarkHistory? _history;
-    private BenchmarkObservation? _baselineObservation;
-    private BenchmarkObservation? _comparisonObservation;
-    private RegressionInvestigationResult? _analysis;
-    private Uri? _runtimeCompareUri;
-    private Uri? _performanceCompareUri;
-
-    private double CurrentAbsoluteDelta =>
-        UseRobustSummary
-            ? _analysis!.Windows.AbsoluteDelta
-            : _analysis!.Points.AbsoluteDelta;
-
-    private double? CurrentPercentChange =>
-        UseRobustSummary
-            ? _analysis!.Windows.PercentChange
-            : _analysis!.Points.PercentChange;
-
-    private double? CurrentRatio =>
-        UseRobustSummary
-            ? _analysis!.Windows.Ratio
-            : _analysis!.Points.Ratio;
+    private readonly string _titleId = $"interval-comparison-{Guid.NewGuid():N}";
+    private IReadOnlyList<IntervalRow> _rows = [];
 
     protected override void OnParametersSet()
     {
-        var effectiveRunId = InvestigationRunId
-            ?? BaselinePin?.RunId
-            ?? ComparisonPin?.RunId;
-        _history = Histories.FirstOrDefault(history => history.Run.Id == effectiveRunId);
-        _baselineObservation = _history is null || BaselinePin is null
-            ? null
-            : RegressionInvestigation.Resolve(_history, BaselinePin);
-        _comparisonObservation = _history is null || ComparisonPin is null
-            ? null
-            : RegressionInvestigation.Resolve(_history, ComparisonPin);
-        _analysis = _history is null || BaselinePin is null || ComparisonPin is null
-            ? null
-            : RegressionInvestigation.Analyze(_history, BaselinePin, ComparisonPin);
-        _runtimeCompareUri = _analysis is null
-            ? null
-            : GitHubCompareLinkBuilder.Runtime(
-                _analysis.Points.Older.RuntimeSha,
-                _analysis.Points.Newer.RuntimeSha);
-        _performanceCompareUri = _analysis is null
-            ? null
-            : GitHubCompareLinkBuilder.Performance(
-                _analysis.Points.Older.PerformanceSha,
-                _analysis.Points.Newer.PerformanceSha);
+        if (BaselinePin is null || ComparisonPin is null)
+        {
+            _rows = [];
+            return;
+        }
+
+        var rows = new List<IntervalRow>();
+        foreach (var benchmark in Benchmarks)
+        {
+            foreach (var runId in RunIds)
+            {
+                var run = KnownRunConfigurations.All.FirstOrDefault(candidate => candidate.Id == runId);
+                if (run is null)
+                {
+                    continue;
+                }
+
+                var history = Histories.FirstOrDefault(candidate =>
+                    candidate.Benchmark == benchmark && candidate.Run.Id == runId);
+                if (history is null)
+                {
+                    rows.Add(new IntervalRow(benchmark, run, true, null, null, null));
+                    continue;
+                }
+
+                var comparison = BenchmarkIntervalComparisonCalculator.Analyze(
+                    history,
+                    BaselinePin.Identity.Timestamp,
+                    ComparisonPin.Identity.Timestamp);
+                rows.Add(new IntervalRow(
+                    benchmark,
+                    run,
+                    false,
+                    comparison.AtA,
+                    comparison.AtB,
+                    comparison.Analysis));
+            }
+        }
+
+        _rows = rows;
     }
 
-    private RenderFragment ObservationDetails(BenchmarkObservation observation) => @<div class="observation-details">
-        @{
-            var unit = DurationFormatter.SelectUnit(observation.Value);
+    private RenderFragment SampleDetails(IntervalSample sample) => @<div class="interval-sample">
+        @if (sample.Observation is null)
+        {
+            <strong>@UnavailableText(sample)</strong>
+            @if (sample.Status == IntervalSampleStatus.TooDistant)
+            {
+                <small>@FormatOffset(sample.Offset) away · limit @FormatOffset(sample.MaximumOffset)</small>
+            }
         }
-        <div class="observation-value">
-            <strong title="@DurationFormatter.FormatExactNanoseconds(observation.Value)">
-                @DurationFormatter.Format(observation.Value, unit)
-            </strong>
-            @if (observation.Error is not null)
+        else
+        {
+            var unit = DurationFormatter.SelectUnit(sample.Observation.Value);
+            <strong>@DurationFormatter.Format(sample.Observation.Value, unit)</strong>
+            @if (sample.Observation.Error is not null)
             {
-                <span title="@DurationFormatter.FormatExactNanoseconds(observation.Error)">
-                    ± @DurationFormatter.Format(observation.Error.Value, unit)
-                </span>
+                <small>± @DurationFormatter.Format(sample.Observation.Error.Value, unit)</small>
             }
-        </div>
-        <small>
-            Exact @DurationFormatter.FormatExactNanoseconds(observation.Value)
-            @if (observation.Error is not null)
-            {
-                <text> ± @DurationFormatter.FormatExactNanoseconds(observation.Error)</text>
-            }
-        </small>
-        <time datetime="@observation.Timestamp.ToString("s", CultureInfo.InvariantCulture)">
-            @observation.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
-        </time>
-        <dl>
-            <div><dt>trace/build</dt><dd title="@observation.TraceName">@(observation.TraceName ?? "not reported")</dd></div>
-            <div><dt>runtime</dt><dd><code title="@observation.RuntimeSha">@ShortSha(observation.RuntimeSha)</code></dd></div>
-            <div><dt>performance</dt><dd><code title="@observation.PerformanceSha">@ShortSha(observation.PerformanceSha)</code></dd></div>
-        </dl>
+            <small>@FormatTimestamp(sample.Observation.Timestamp)</small>
+            <small>@FormatOffset(sample.Offset) from target · @ShortSha(sample.Observation.RuntimeSha)</small>
+        }
     </div>;
 
-    private RenderFragment WindowDetails(string label, RobustWindowSummary summary) => @<article>
+    private RenderFragment ChangeDetails(RegressionInvestigationResult analysis) => @<div class="interval-change">
         @{
-            var unit = DurationFormatter.SelectUnit(summary.Median);
+            var absoluteDelta = UseRobustSummary
+                ? analysis.Windows.AbsoluteDelta
+                : analysis.Points.AbsoluteDelta;
+            var percentChange = UseRobustSummary
+                ? analysis.Windows.PercentChange
+                : analysis.Points.PercentChange;
+            var olderValue = UseRobustSummary
+                ? analysis.Windows.Older.Median
+                : analysis.Points.Older.Value;
+            var unit = DurationFormatter.SelectUnit(olderValue, olderValue + absoluteDelta);
+            var olderSlot = analysis.Points.OlderSlot;
+            var olderEndpoint = olderSlot == InvestigationPinSlot.BaselineA
+                ? BaselinePin!
+                : ComparisonPin!;
+            var newerEndpoint = olderSlot == InvestigationPinSlot.BaselineA
+                ? ComparisonPin!
+                : BaselinePin!;
+            var runtimeLink = GitHubCompareLinkBuilder.Runtime(
+                analysis.Points.Older.RuntimeSha,
+                analysis.Points.Newer.RuntimeSha);
+            var performanceLink = GitHubCompareLinkBuilder.Performance(
+                analysis.Points.Older.PerformanceSha,
+                analysis.Points.Newer.PerformanceSha);
         }
-        <span>@label</span>
-        <strong>median @DurationFormatter.Format(summary.Median, unit)</strong>
-        <small>n=@summary.Count · IQR @DurationFormatter.Format(summary.InterquartileRange, unit)</small>
-        <small>Q1 @DurationFormatter.Format(summary.FirstQuartile, unit) ·
-            Q3 @DurationFormatter.Format(summary.ThirdQuartile, unit)</small>
-    </article>;
+        <strong>@FormatSigned(absoluteDelta, unit)</strong>
+        @if (percentChange is null)
+        {
+            <small>percent undefined (older value is zero)</small>
+        }
+        else
+        {
+            <small>@percentChange.Value.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture)%</small>
+        }
+        @if (UseRobustSummary)
+        {
+            <small>median @DurationFormatter.Format(analysis.Windows.Older.Median, unit) → @DurationFormatter.Format(analysis.Windows.Newer.Median, unit)</small>
+            <small>window samples n=@analysis.Windows.Older.Count → n=@analysis.Windows.Newer.Count</small>
+        }
+        else
+        {
+            <small>@SlotLabel(olderSlot) @FormatTimestamp(olderEndpoint.Identity.Timestamp) → @SlotLabel(Opposite(olderSlot)) @FormatTimestamp(newerEndpoint.Identity.Timestamp)</small>
+        }
+        <div class="interval-links">
+            @if (runtimeLink is not null)
+            {
+                <a href="@runtimeLink" target="_blank" rel="noopener noreferrer">runtime ↗</a>
+            }
+            @if (performanceLink is not null)
+            {
+                <a href="@performanceLink" target="_blank" rel="noopener noreferrer">performance ↗</a>
+            }
+        </div>
+    </div>;
 
-    private Task ChangeSummaryAsync(bool robust) =>
-        UseRobustSummaryChanged.InvokeAsync(robust);
+    private static string UnavailableText(IntervalSample sample) => sample.Status switch
+    {
+        IntervalSampleStatus.NoObservations => "No observations",
+        IntervalSampleStatus.TooDistant => "Nearest sample is too far away",
+        IntervalSampleStatus.Ambiguous => "Equidistant samples; endpoint is ambiguous",
+        _ => "Sample unavailable"
+    };
 
-    private Task ClearPinAsync(InvestigationPinSlot slot) =>
-        PinCleared.InvokeAsync(slot);
+    private static string FormatTimestamp(DateTime timestamp) =>
+        timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
-    private Task ClearAllAsync() => ClearAll.InvokeAsync();
+    private static string FormatOffset(TimeSpan offset) =>
+        offset.TotalDays >= 1
+            ? $"{offset.TotalDays:0.#}d"
+            : offset.TotalHours >= 1
+                ? $"{(int)offset.TotalHours}h {offset.Minutes}m"
+                : $"{(int)Math.Ceiling(offset.TotalMinutes)}m";
+
+    private static string FormatSigned(double value, DurationUnit unit) =>
+        (value > 0 ? "+" : "") + DurationFormatter.Format(value, unit);
+
+    private static string ShortSha(string sha) => sha.Length <= 10 ? sha : sha[..10];
 
     private static InvestigationPinSlot Opposite(InvestigationPinSlot slot) =>
         slot == InvestigationPinSlot.BaselineA
@@ -324,8 +292,19 @@
     private static string SlotLabel(InvestigationPinSlot slot) =>
         slot == InvestigationPinSlot.BaselineA ? "A" : "B";
 
-    private static string ShortSha(string sha) => sha.Length <= 10 ? sha : sha[..10];
+    private Task ChangeSummaryAsync(bool robust) =>
+        UseRobustSummaryChanged.InvokeAsync(robust);
 
-    private static string FormatSigned(double value) =>
-        (value > 0 ? "+" : "") + DurationFormatter.Format(value);
+    private Task ClearPinAsync(InvestigationPinSlot slot) =>
+        PinCleared.InvokeAsync(slot);
+
+    private Task ClearAllAsync() => ClearAll.InvokeAsync();
+
+    private sealed record IntervalRow(
+        string Benchmark,
+        RunConfiguration Run,
+        bool MissingHistory,
+        IntervalSample? AtA,
+        IntervalSample? AtB,
+        RegressionInvestigationResult? Analysis);
 }

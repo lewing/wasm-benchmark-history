@@ -89,6 +89,45 @@ public sealed class ChangeSetIssueTests
         Assert.Contains("source link", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("\"")]
+    [InlineData("'")]
+    public void Parser_ReadsHtmlHistoryLinksWithCounterQuery(string quote)
+    {
+        var document = new ChangeSetIssueParser().Parse(Payload(HtmlHistoryFixture(quote), []));
+        var row = document.Groups[0].Rows[0];
+
+        Assert.Equal(ParseFixture().Groups[0].Rows[0].Benchmark, row.Benchmark);
+        Assert.Equal("Run/Case", row.DisplayName);
+        Assert.Equal("?counter=Duration%20of%20single%20invocation", row.HistoryUri.Query);
+        Assert.NotNull(row.SourceUri);
+    }
+
+    [Fact]
+    public void Parser_RejectsUnsafeHtmlHistoryLinks()
+    {
+        var body = HtmlHistoryFixture("\"").Replace(
+            "<a href=\"https://pvscmdupload.z22.web.core.windows.net/",
+            "<a href=\"https://example.com/",
+            StringComparison.Ordinal);
+
+        var exception = Assert.Throws<PerfIssueException>(
+            () => new ChangeSetIssueParser().Parse(Payload(body, [])));
+
+        Assert.Contains("history link", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string HtmlHistoryFixture(string quote)
+    {
+        var body = Fixture.Read("autofile-issue.md");
+        var original = body.Split('\n').First(line => line.StartsWith("|<ul>", StringComparison.Ordinal));
+        var history = ParseFixture().Groups[0].Rows[0].HistoryUri.AbsoluteUri;
+        var replacement = $"|<ul><li><a href={quote}{history}?counter=Duration%20of%20single%20invocation{quote}>"
+            + "Run/Case \u2014 Duration of single invocation</a>"
+            + original[original.IndexOf("</li>", StringComparison.Ordinal)..];
+        return body.Replace(original, replacement, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Parser_RejectsRuntimeDiffThatDoesNotMatchDisplayedShas()
     {

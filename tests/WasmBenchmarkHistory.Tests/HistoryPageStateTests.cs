@@ -57,6 +57,31 @@ public sealed class HistoryPageStateTests
     }
 
     [Fact]
+    public void StateRoundTripsIntervalPinsFromDifferentRuns()
+    {
+        var state = new HistoryPageState(
+            "Fixture",
+            ["mono-wasm", "coreclr-wasm"],
+            false,
+            HistoryTimeRange.All,
+            null,
+            new ObservationIdentity(new DateTime(2026, 1, 1), "abcdef1", "1234567"),
+            new ObservationIdentity(new DateTime(2026, 2, 1), "abcdef2", "1234568"),
+            false,
+            BaselineRunId: "mono-wasm",
+            ComparisonRunId: "coreclr-wasm");
+
+        var result = HistoryPageStateCodec.Parse(HistoryPageStateCodec.ToRelativeUri(state));
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal(state.BaselineA, result.State.BaselineA);
+        Assert.Equal(state.ComparisonB, result.State.ComparisonB);
+        Assert.Equal(state.BaselineRunId, result.State.BaselineRunId);
+        Assert.Equal(state.ComparisonRunId, result.State.ComparisonRunId);
+        Assert.Null(result.State.InvestigationRunId);
+    }
+
+    [Fact]
     public void InvalidSharedValuesAreIgnoredWithWarnings()
     {
         var result = HistoryPageStateCodec.Parse(
@@ -96,5 +121,68 @@ public sealed class HistoryPageStateTests
         Assert.Contains(
             result.Warnings,
             warning => warning.Contains("malformed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MultiselectionRoundTripsOrderAndActiveBenchmark()
+    {
+        var state = new HistoryPageState(
+            "B(value: \"a,b&c\")", ["mono-wasm", "coreclr-wasm"], false,
+            HistoryTimeRange.All, null, null, null, false,
+            SelectedBenchmarks: ["A", "B(value: \"a,b&c\")", "C"]);
+
+        var result = HistoryPageStateCodec.Parse(HistoryPageStateCodec.ToRelativeUri(state));
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal(state.Benchmark, result.State.Benchmark);
+        Assert.Equal(state.SelectedBenchmarks, result.State.SelectedBenchmarks);
+    }
+
+    [Fact]
+    public void LegacySingleBenchmarkLinksRestoreASingleSelection()
+    {
+        var result = HistoryPageStateCodec.Parse("/?benchmark=A");
+
+        Assert.Equal(["A"], result.State.SelectedBenchmarks);
+        Assert.Equal("A", result.State.Benchmark);
+    }
+
+    [Fact]
+    public void SelectedBenchmarksAreValidatedAndDeduplicated()
+    {
+        var result = HistoryPageStateCodec.Parse("/?selected=A&selected=A&selected=&selected=B");
+
+        Assert.Equal(["A", "B"], result.State.SelectedBenchmarks);
+        Assert.Equal("A", result.State.Benchmark);
+        Assert.Single(result.Warnings);
+    }
+
+    [Fact]
+    public void FocusedRunsRoundTripAndAreOmittedWhenEmpty()
+    {
+        var state = new HistoryPageState(
+            "A", ["mono-wasm", "coreclr-wasm"], false,
+            HistoryTimeRange.All, null, null, null, false,
+            FocusedRunIds: ["coreclr-wasm"]);
+
+        var uri = HistoryPageStateCodec.ToRelativeUri(state);
+        var result = HistoryPageStateCodec.Parse(uri);
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal(["coreclr-wasm"], result.State.FocusedRunIds);
+        Assert.DoesNotContain(
+            "focus=",
+            HistoryPageStateCodec.ToRelativeUri(state with { FocusedRunIds = [] }),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FocusOnRunThatIsNotShownIsIgnoredWithWarning()
+    {
+        var result = HistoryPageStateCodec.Parse(
+            "/?benchmark=A&runs=mono-wasm,coreclr-wasm&focus=not-a-run");
+
+        Assert.Empty(result.State.FocusedRunIds ?? []);
+        Assert.Contains(result.Warnings, warning => warning.Contains("focus", StringComparison.Ordinal));
     }
 }

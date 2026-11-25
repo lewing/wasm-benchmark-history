@@ -16,24 +16,54 @@ dotnet restore WasmBenchmarkHistory.slnx
 dotnet run --project src/WasmBenchmarkHistory
 ```
 
-Open the URL printed by ASP.NET Core, search for a benchmark, select two to
-five available run configurations, and choose **Compare histories**. The chart
-can show complete raw histories or normalize strict matched observations to the
+Open the URL printed by ASP.NET Core and select a benchmark in the tree to load
+its comparison automatically. Cmd/Ctrl-click or use checkboxes to select multiple
+benchmarks; Shift-click selects a visible range. Arrow keys navigate the tree,
+Left/Right collapse or expand categories, and Ctrl/Cmd-arrow moves focus without
+changing selection. Search filters the tree without clearing the selection.
+Selected benchmarks appear as stacked graphs with a shared time axis and
+synchronized zoom, but independent value scales. With two or more benchmarks
+the stack switches to compact rows under one sticky toolbar and legend: dates
+are drawn only on the bottom row, and hovering any row draws a crosshair at the
+same time on the others. Variability panels move into the active benchmark's
+details. **Show details** chooses the
+active benchmark for the single investigation panel and comparison table below
+the stack; pinning an observation also activates its benchmark.
+Baseline A and comparison B can be pinned from any selected chart, including
+different benchmarks and runtimes. Both date guides appear across the full
+stack, and the interval panel compares each available benchmark/runtime pair
+independently using raw values. It reports the actual sample dates and offsets;
+samples farther than three median observation intervals (bounded to 7–30 days)
+or tied between two observations are marked unavailable. Exact build-identity
+matches remain in the separate point-by-point comparison table.
+Each run configuration, in the sidebar list or the chart legend, cycles
+**off → shown → focused**. Showing or hiding a run refreshes the comparison;
+at least two runs must be shown. Focusing only changes emphasis: focused runs
+stay bright and other shown runs fade in every chart (several runs can be
+focused at once), and the focus is kept in the URL as `focus=`.
+Missing runs and history errors are shown per benchmark.
+The chart can show complete
+raw histories or normalize strict matched observations to the
 first selected run. Hover the chart to inspect the nearest timestamp, or focus
 it and use the left/right arrow, Home, and End keys. The detail card reports
 each run's value, build identities, trace name, and strict ratio when available.
 Hover and keyboard scrubbing are read-only previews. Click or tap a timestamp,
 or press Enter/Space while the chart scrubber is focused, to pin the card and
-reveal A/B actions. A pinned card remains stable while the pointer moves; click
-another timestamp to move it, or press Escape/use its close button to unpin.
+reveal A/B actions. A pinned card remains stable while the pointer moves within
+its chart; click another timestamp to move it. Only one card is open per stack.
+Moving to another chart, clicking outside, scrolling the page, or pressing
+Escape dismisses it; the close button also unpins and closes it. Long cards
+scroll internally without dismissing. Closing a card does not clear A/B pins.
 Choosing **Set baseline A** or **Set comparison B** automatically returns the
 chart to selection mode and focuses the keyboard scrubber, so the next point can
 be previewed and pinned immediately. A short status message states which pin is
 still needed. Shaded bands identify long gaps where the history line is not
-connected; dotted markers identify changes to the dotnet/performance revision.
-Open **Chart annotations** for their dates and revision identities.
-The server and standalone WASM hosts share the chart component, stylesheet,
-and JavaScript through MSBuild links rather than maintaining separate copies.
+connected. Enable **Performance revisions** to show dotted markers for changes
+to the dotnet/performance revision; they are hidden by default. Open **Chart
+annotations** for their dates and revision identities.
+The server and standalone WASM hosts share the explorer page, chart, variability,
+and interval-comparison components, stylesheets, and JavaScript through MSBuild
+links rather than maintaining separate copies.
 
 All app-owned duration displays start from nanoseconds and use adaptive `ps`,
 `ns`, `µs`, `ms`, or `s` units. Each chart axis keeps one stable unit across its
@@ -64,9 +94,9 @@ node --test .github/extensions/adx-benchmark-canvas/extension.test.mjs
 ### Investigate a temporal regression
 
 Use **30d**, **90d**, **1y**, or **All** to focus the chart, or drag across the
-plot to create a custom zoom range. Open an observation detail card and pin one
-observation from a run as **baseline A**, then another observation from that
-same run as **comparison B**. Pins remain visible while inspecting other points.
+plot to create a custom zoom range. Open an observation detail card and pin a timestamp as **baseline A**, then pin
+another timestamp as **comparison B**. The pins can come from different
+benchmarks or runtimes and remain visible across the selected chart stack.
 Enable **Variability analysis** to keep the combined linear chart as the
 magnitude overview while adding one aligned small multiple per runtime. Each
 small multiple has its own linear value axis and overlays a descriptive trailing
@@ -79,17 +109,18 @@ To keep Blazor Server interaction responsive, passive hover updates only the
 main chart and detail card. The heavier variability panels synchronize when a
 timestamp is explicitly pinned.
 
-The regression panel always presents the observations older-first, even when A
-and B were selected in reverse. It reports the raw values/errors, absolute and
-percentage change, ratio, trace/build names, full source identities, and safe
-`dotnet/runtime` / `dotnet/performance` compare links when their SHAs differ.
-A zero older value is reported as an undefined percentage/ratio rather than
-infinity.
+The interval panel compares each benchmark/runtime pair independently, choosing
+the nearest sample to each pin only when it falls within the documented cadence
+tolerance. It presents changes older-first, even when A and B were selected in
+reverse; shows both sample times, offsets, values/errors, absolute and percentage
+change; and links `dotnet/runtime` / `dotnet/performance` commits when their
+SHAs differ. Missing, distant, and ambiguous samples are explicit. A zero older
+value is reported as an undefined percentage/ratio rather than infinity.
 
-The optional robust summary uses up to seven observations around each pin (the
-pin plus three neighbors on either side). It compares medians and reports the
-interpolated 25th/75th percentiles and IQR with sample counts. It intentionally
-does not claim statistical significance or calculate a p-value.
+The optional robust summary uses up to seven observations around each selected
+endpoint sample (the sample plus three neighbors on either side). It compares
+medians and reports sample counts. It intentionally does not claim statistical
+significance or calculate a p-value.
 
 Rolling variability panels are likewise descriptive context, not a confidence
 interval or significance test. In normalized mode they are calculated from the
@@ -97,8 +128,8 @@ displayed strict-match ratios rather than mixing raw measurement units. Lines
 break across unusually long publication gaps instead of implying continuous
 measurement.
 
-Benchmark, selected runs, chart mode/range, variability-band settings,
-investigation run, summary method, and exact A/B identities are encoded in the
+Selected benchmarks, active benchmark, selected runs, chart mode/range, variability-band settings,
+summary method, and A/B timestamps with their source run/observation identities are encoded in the
 query string. Reloading or sharing the URL restores valid state; malformed,
 unavailable, or ambiguous fields are ignored with an on-page explanation.
 
@@ -164,6 +195,8 @@ does not follow HTTP redirects, and fetches GitHub data only from the server.
 The importer reads hidden `DATA` metadata, repeated run-information sections,
 improvement/regression groups, benchmark table rows, exact history/source/report
 links, reported values, Test Quality, Edge Detector, and group repro commands.
+Both legacy Markdown history links and current HTML anchors with counter queries
+are supported, with the same host/path and run-identity checks.
 It does not render issue HTML or Markdown. External triage is collapsed by
 default and reduced to a plain-text summary plus allowlisted HTTPS links; it is
 explicitly issue commentary rather than analysis produced by this app.
@@ -215,8 +248,8 @@ Request timeout is controlled by `GitHub:RequestTimeoutSeconds`:
 
 The prototype does not fetch all benchmark histories, display the issue's
 static graph images, execute repro commands, query ADX, infer candidate commits,
-or claim a root cause. It supports only the current public autofiling Markdown
-shape and the known report host/run catalog. Schema changes, unsafe links,
+or claim a root cause. It supports the known public autofiling issue formats
+and report host/run catalog. Schema changes, unsafe links,
 unsupported runs, and exact-match failures are surfaced as errors.
 
 ## Same-build comparisons
@@ -649,8 +682,9 @@ running the app does not.
 - `Components/HistoryChart.razor` renders a responsive native SVG chart without
   a charting dependency. Its collocated JavaScript module keeps drag movement
   local and sends one completed range to the server.
-- `Components/RegressionInvestigationPanel.razor` keeps within-run temporal
-  analysis visually and semantically separate from strict runtime comparison.
+- `Components/RegressionInvestigationPanel.razor` compares shared A/B intervals
+  independently for every selected benchmark/runtime; `BenchmarkIntervalComparison.cs`
+  resolves nearby samples without comparing values across runs.
 - `Data/BenchmarkIndexParser.cs` catalogs links from the published index
   pages (four required, plus the optional composite R2R index). `DirectSnapshotHistory.cs` adds valid fallback snapshot identities and
   merges exact observations only after a benchmark is selected.
@@ -658,7 +692,7 @@ running the app does not.
   from generated JavaScript as text. It never evaluates downloaded JavaScript.
 - `Data/ObservationMatcher.cs` joins observations only on timestamp, runtime
   SHA, and performance-repository SHA. There is no timestamp-only fallback.
-- `Data/RegressionInvestigation.cs`, `HistoryTimeRange.cs`, and
+- `Data/RegressionInvestigation.cs`, `BenchmarkIntervalComparison.cs`, `HistoryTimeRange.cs`, and
   `HistoryPageState.cs` provide exact pin resolution, median/IQR windows,
   validated compare links, range resolution, and safe share-state parsing.
 - `Data/ChangeSetIssueParser.cs` treats autofiling issue Markdown as untrusted
@@ -702,15 +736,17 @@ encoded or raw slashes while rejecting external links. Parsed arrays must be
 aligned before observations are created. Network, schema, and unavailable
 benchmark failures are surfaced in the UI.
 
-The parser intentionally supports only the currently published literal shape:
-the `defaultCounter` ID, its `trendData[...]` assignment, and the first object
-in that array. A generator change such as computed properties, non-literal
+The history parser supports the legacy `defaultCounter` assignment and current
+JSON `tableData` counter metadata, preserving counter IDs without floating-point
+conversion. It reads the corresponding literal `trendData[...]` assignment and
+the first object in that array. Ambiguous counter metadata or a generator change
+such as computed properties, non-literal
 arrays, a new timestamp format, or renamed fields will produce a schema error
 rather than execute or guess at the data.
 
-The only JavaScript owned by this app is the checked-in chart drag module. It
-operates solely on local pointer coordinates and never receives or evaluates
-content downloaded from benchmark pages.
+The checked-in chart and tree interaction modules operate only on local input
+and rendered app elements. They never receive or evaluate scripts downloaded
+from benchmark pages.
 
 ## Cache configuration
 

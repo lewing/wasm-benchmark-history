@@ -216,8 +216,11 @@ public sealed partial class ChangeSetIssueParser
             throw SchemaError("A benchmark table row did not have the expected columns.");
         }
 
-        var links = MarkdownLinkPattern().Matches(cells[0]);
-        if (links.Count == 0)
+        var links = MarkdownLinkPattern().Matches(cells[0])
+            .Concat(HtmlLinkPattern().Matches(cells[0]))
+            .OrderBy(link => link.Index)
+            .ToArray();
+        if (links.Length == 0)
         {
             throw SchemaError("A benchmark row did not contain a history link.");
         }
@@ -230,7 +233,7 @@ public sealed partial class ChangeSetIssueParser
 
         var target = ImportedHistoryTarget.Parse(history);
         Uri? source = null;
-        foreach (Match link in links.Cast<Match>().Skip(1))
+        foreach (var link in links.Skip(1))
         {
             var candidate = ParseAbsoluteUri(link.Groups["uri"].Value, "benchmark source");
             if (link.Groups["text"].Value.Contains("Benchmark Source", StringComparison.OrdinalIgnoreCase))
@@ -274,10 +277,13 @@ public sealed partial class ChangeSetIssueParser
                 ? parsedEdge
                 : throw SchemaError($"Reported edge detector '{cells[5]}' was invalid.");
         var displayName = WebUtility.HtmlDecode(links[0].Groups["text"].Value);
-        const string durationSuffix = " - Duration of single invocation";
-        if (displayName.EndsWith(durationSuffix, StringComparison.Ordinal))
+        foreach (var suffix in new[] { " - Duration of single invocation", " \u2014 Duration of single invocation" })
         {
-            displayName = displayName[..^durationSuffix.Length];
+            if (displayName.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                displayName = displayName[..^suffix.Length];
+                break;
+            }
         }
 
         return new ChangeSetBenchmark(
@@ -447,6 +453,12 @@ public sealed partial class ChangeSetIssueParser
         RegexOptions.CultureInvariant,
         matchTimeoutMilliseconds: 1000)]
     private static partial Regex MarkdownLinkPattern();
+
+    [GeneratedRegex(
+        @"<a\s+[^>]*?\bhref\s*=\s*(?<quote>[""'])(?<uri>https://.*?)\k<quote>[^>]*>(?<text>.*?)</a\s*>",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        matchTimeoutMilliseconds: 1000)]
+    private static partial Regex HtmlLinkPattern();
 
     [GeneratedRegex(
         @"^\[Test Report\]\(<(?<uri>https://[^>]+)>\)$",

@@ -74,6 +74,49 @@ public sealed class RegressionInvestigationTests
         Assert.Null(RegressionInvestigation.Resolve(history, Pin(first)));
     }
 
+    [Fact]
+    public void IntervalComparison_UsesNearestSamplesWithinEachHistory()
+    {
+        var targetA = new DateTime(2026, 1, 5);
+        var targetB = new DateTime(2026, 1, 20);
+        var firstRun = IntervalHistory("mono-wasm", [10, 20, 40, 80, 90], [0, 5, 15, 25, 30]);
+        var secondRun = IntervalHistory("coreclr-wasm", [100, 50, 25, 10, 5], [0, 5, 15, 25, 30]);
+
+        var first = BenchmarkIntervalComparisonCalculator.Analyze(firstRun, targetA, targetB);
+        var second = BenchmarkIntervalComparisonCalculator.Analyze(secondRun, targetA, targetB);
+
+        Assert.Equal(1, first.AtA.Offset.TotalDays);
+        Assert.Equal(4, first.AtB.Offset.TotalDays);
+        Assert.Equal(20, first.AtA.Observation!.Value);
+        Assert.Equal(40, first.AtB.Observation!.Value);
+        Assert.Equal(100, first.Analysis!.Points.PercentChange);
+        Assert.Equal(50, second.AtA.Observation!.Value);
+        Assert.Equal(25, second.AtB.Observation!.Value);
+        Assert.Equal(-50, second.Analysis!.Points.PercentChange);
+        Assert.Equal("mono-wasm", first.RunId);
+        Assert.Equal("coreclr-wasm", second.RunId);
+    }
+
+    [Fact]
+    public void IntervalComparison_MarksDistantAndEquidistantSamplesUnavailable()
+    {
+        var history = IntervalHistory("mono-wasm", [10, 20], [0, 10]);
+
+        var distant = BenchmarkIntervalComparisonCalculator.Analyze(
+            history,
+            new DateTime(2026, 3, 1),
+            new DateTime(2026, 1, 1));
+        var ambiguous = BenchmarkIntervalComparisonCalculator.Analyze(
+            history,
+            new DateTime(2026, 1, 6),
+            new DateTime(2026, 1, 1));
+
+        Assert.Equal(IntervalSampleStatus.TooDistant, distant.AtA.Status);
+        Assert.Null(distant.AtA.Observation);
+        Assert.Equal(IntervalSampleStatus.Ambiguous, ambiguous.AtA.Status);
+        Assert.Null(ambiguous.Analysis);
+    }
+
     [Theory]
     [InlineData("abcdef1", "1234567", true)]
     [InlineData("not-a-sha", "1234567", false)]
@@ -97,6 +140,27 @@ public sealed class RegressionInvestigationTests
             KnownRunConfigurations.All[0],
             "build",
             observations);
+    }
+
+    private static BenchmarkHistory IntervalHistory(
+        string runId,
+        double[] values,
+        int[] days)
+    {
+        var run = KnownRunConfigurations.All.Single(candidate => candidate.Id == runId);
+        return new BenchmarkHistory(
+            "Fixture",
+            run,
+            "build",
+            values.Select((value, index) => new BenchmarkObservation(
+                "Fixture",
+                runId,
+                new DateTime(2026, 1, 1).AddDays(days[index]),
+                value,
+                .1,
+                $"{index + 10:x7}",
+                $"{index + 100:x7}",
+                $"build-{index}")).ToArray());
     }
 
     private static BenchmarkObservation Observation(

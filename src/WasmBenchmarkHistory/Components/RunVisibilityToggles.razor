@@ -1,0 +1,89 @@
+<div class="run-toggles @(Legend ? "legend" : "list")" role="group" aria-label="@Label">
+    @foreach (var run in KnownRunConfigurations.All)
+    {
+        var visibility = State.Get(run.Id);
+        var available = IsAvailable(run.Id);
+        if (Legend && visibility == RunVisibility.Hidden && !available)
+        {
+            continue;
+        }
+
+        <button type="button"
+                class="run-toggle is-@visibility.ToString().ToLowerInvariant() @(visibility != RunVisibility.Hidden && State.IsDimmed(run.Id) ? "is-dimmed" : null)"
+                style="--series-color:@run.Color"
+                disabled="@(!available && visibility == RunVisibility.Hidden)"
+                title="@ActionHint(visibility)"
+                aria-label="@($"{run.DisplayName}: {StateText(visibility)}. {ActionHint(visibility)}")"
+                @onclick="() => OnCycle.InvokeAsync(run.Id)">
+            <span class="run-mark" aria-hidden="true"><i></i></span>
+            <span class="run-copy">
+                <strong>@run.DisplayName</strong>
+                @if (!Legend && Describe is not null)
+                {
+                    <small>@Describe(run)</small>
+                }
+            </span>
+            <span class="run-state" aria-hidden="true">@StateText(visibility)</span>
+        </button>
+    }
+    @if (State.FocusedRunIds.Count > 0)
+    {
+        <button type="button" class="clear-focus" @onclick="OnClearFocus">Clear focus</button>
+    }
+    @if (!Legend)
+    {
+        <span class="visually-hidden" role="status" aria-live="polite">@Status</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RunVisibilityState State { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public Func<string, bool> IsAvailable { get; set; } = _ => true;
+
+    [Parameter]
+    public Func<RunConfiguration, string>? Describe { get; set; }
+
+    /// <summary>Renders as a compact horizontal chart legend instead of the configuration list.</summary>
+    [Parameter]
+    public bool Legend { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = "Run configurations";
+
+    [Parameter]
+    public EventCallback<string> OnCycle { get; set; }
+
+    [Parameter]
+    public EventCallback OnClearFocus { get; set; }
+
+    private static string StateText(RunVisibility visibility) => visibility switch
+    {
+        RunVisibility.Hidden => "off",
+        RunVisibility.Shown => "shown",
+        _ => "focused"
+    };
+
+    private static string ActionHint(RunVisibility visibility) => visibility switch
+    {
+        RunVisibility.Hidden => "Click to show",
+        RunVisibility.Shown => "Click to focus; other runs fade",
+        _ => "Click to hide"
+    };
+
+    private string Status
+    {
+        get
+        {
+            var focused = KnownRunConfigurations.All
+                .Where(run => State.FocusedRunIds.Contains(run.Id))
+                .Select(run => run.DisplayName)
+                .ToArray();
+            return focused.Length == 0
+                ? $"{State.ShownRunIds.Count} runs shown"
+                : $"{string.Join(", ", focused)} focused; other shown runs faded";
+        }
+    }
+}

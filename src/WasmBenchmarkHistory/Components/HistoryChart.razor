@@ -1,56 +1,10 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 
-<div class="chart-shell">
-    <div class="chart-toolbar">
-        <fieldset>
-            <legend>Time range</legend>
-            @foreach (var option in RangeOptions)
-            {
-                <button type="button"
-                        class="@(TimeRange.Kind == option.Range.Kind ? "active" : null)"
-                        aria-pressed="@(TimeRange.Kind == option.Range.Kind)"
-                        @onclick="() => ChangeRangeAsync(option.Range)">
-                    @option.Label
-                </button>
-            }
-            <button type="button"
-                    class="reset-range"
-                    disabled="@(TimeRange.Kind == HistoryRangeKind.All)"
-                    @onclick="ResetRangeAsync">
-                Reset
-            </button>
-        </fieldset>
-        <fieldset class="band-controls">
-            <legend>Variability</legend>
-            <label>
-                <input type="checkbox"
-                       checked="@ShowVariabilityBand"
-                       @onchange="OnVariabilityBandChanged" />
-                Variability analysis
-            </label>
-            <select value="@VariabilityWindow"
-                    disabled="@(!ShowVariabilityBand)"
-                    aria-label="Variability band observation window"
-                    @onchange="OnVariabilityWindowChanged">
-                @foreach (var window in RollingVariabilityCalculator.SupportedWindows)
-                {
-                    <option value="@window">@window observations</option>
-                }
-            </select>
-        </fieldset>
-        <span class="zoom-help">
-            @(TimeRange.Kind == HistoryRangeKind.Custom
-                ? $"{TimeRange.Start:yyyy-MM-dd} – {TimeRange.End:yyyy-MM-dd}"
-                : ShowVariabilityBand
-                    ? $"Aligned {VariabilityWindow}-observation median/IQR and relative-IQR panels"
-                    : "Drag across the plot to zoom")
-        </span>
-    </div>
-
+<div class="chart-shell @(Compact ? ShowTimeAxis ? "compact with-axis" : "compact" : null)">
     @if (DirectCount > 0)
     {
-        <div id="direct-snapshot-note" class="direct-note">
+        <div id="@DirectNoteId" class="direct-note @(Compact ? "visually-hidden" : null)">
             Diamond markers are bundled fallback observations used only where published history has no exact
             timestamp/runtime/performance match. Dashed connectors are visual guides between consecutive fallback
             observations and break across long gaps; they do not imply continuous published history.
@@ -66,41 +20,11 @@
     }
     else
     {
-        <div class="legend" aria-label="Chart series">
-            @foreach (var series in Series)
-            {
-                <button type="button"
-                        class="legend-item @SeriesFocusClass(series.History.Run.Id)"
-                        style="--series-color:@series.History.Run.Color"
-                        aria-pressed="@(_seriesFocus.IsFocused(series.History.Run.Id).ToString().ToLowerInvariant())"
-                        aria-label="@LegendFocusLabel(series)"
-                        @onclick="() => ToggleSeriesFocus(series.History.Run.Id)">
-                    <span class="legend-symbol @(series.IsDirectOnly ? "direct" : "published")"
-                          aria-hidden="true">
-                        <i></i>
-                    </span>
-                    <span class="legend-copy">
-                        <strong>@series.History.Run.DisplayName</strong>
-                        <small>@series.Points.Count.ToString("N0") visible points@(DirectSuffix(series.History))</small>
-                    </span>
-                </button>
-            }
-            @if (_seriesFocus.FocusedRunId is not null)
-            {
-                <button type="button"
-                        class="legend-reset"
-                        @onclick="ShowAllSeries">
-                    Show all
-                </button>
-            }
-            <span class="visually-hidden" role="status" aria-live="polite">@SeriesFocusStatus</span>
-        </div>
-
         <div class="plot-area" @onkeydown="OnPlotKeyDown">
             <div class="svg-wrap">
                 <svg @ref="_chartElement"
                      class="@(_selectionState.IsPinned ? "selection-pinned" : null)"
-                     viewBox="0 0 1000 430"
+                     viewBox="0 0 1000 @ViewHeight.ToString(CultureInfo.InvariantCulture)"
                      preserveAspectRatio="none"
                      role="img"
                      aria-label="Historical benchmark line chart"
@@ -121,24 +45,27 @@
                         </rect>
                     }
 
-                    @foreach (var marker in PerformanceRevisionMarkers)
+                    @if (ShowPerformanceRevisionMarkers)
                     {
-                        var x = ScaleX(marker.Timestamp.Ticks);
-                        <line class="performance-revision-marker"
-                              x1="@x"
-                              y1="@PlotTop"
-                              x2="@x"
-                              y2="@(PlotTop + PlotHeight)">
-                            <title>@marker.Description</title>
-                        </line>
+                        @foreach (var marker in PerformanceRevisionMarkers)
+                        {
+                            var x = ScaleX(marker.Timestamp.Ticks);
+                            <line class="performance-revision-marker"
+                                  x1="@x"
+                                  y1="@PlotTop"
+                                  x2="@x"
+                                  y2="@(PlotTop + PlotHeight)">
+                                <title>@marker.Description</title>
+                            </line>
+                        }
                     }
 
-                    @for (var tick = 0; tick <= 4; tick++)
+                    @for (var tick = 0; tick <= YTickCount; tick++)
                     {
-                        var y = PlotTop + PlotHeight * tick / 4d;
+                        var y = PlotTop + PlotHeight * tick / (double)YTickCount;
                         <line class="grid-line" x1="@PlotLeft" y1="@y" x2="@(PlotLeft + PlotWidth)" y2="@y" />
                         <svg:text class="axis-label" x="@(PlotLeft - 12)" y="@(y + 4)" text-anchor="end">
-                            @FormatAxisValue(MaxY - (MaxY - MinY) * tick / 4d)
+                            @FormatAxisValue(MaxY - (MaxY - MinY) * tick / (double)YTickCount)
                         </svg:text>
                     }
 
@@ -146,10 +73,15 @@
                     {
                         var x = PlotLeft + PlotWidth * tick / 4d;
                         <line class="grid-line vertical" x1="@x" y1="@PlotTop" x2="@x" y2="@(PlotTop + PlotHeight)" />
-                        <svg:text class="axis-label" x="@x" y="@(PlotTop + PlotHeight + 28)" text-anchor="middle">
-                            @FormatDate(MinTicks + (long)((MaxTicks - MinTicks) * tick / 4d))
-                        </svg:text>
+                        @if (!Compact || ShowTimeAxis)
+                        {
+                            <svg:text class="axis-label" x="@x" y="@(PlotTop + PlotHeight + (Compact ? 20 : 28))" text-anchor="middle">
+                                @FormatDate(MinTicks + (long)((MaxTicks - MinTicks) * tick / 4d))
+                            </svg:text>
+                        }
                     }
+
+                    <line class="sync-crosshair" x1="@PlotLeft" y1="@PlotTop" x2="@PlotLeft" y2="@(PlotTop + PlotHeight)" />
 
                     @foreach (var series in Series)
                     {
@@ -268,14 +200,23 @@
                 </svg>
             </div>
 
-            @if (LongGapBands.Count > 0 || PerformanceRevisionMarkers.Count > 0)
+            @if (HasVisibleAnnotations)
             {
-                <details id="chart-annotation-note" class="chart-annotations">
+                <details id="@AnnotationNoteId" class="chart-annotations @(Compact ? "visually-hidden" : null)">
                     <summary>
                         Chart annotations · @LongGapBands.Count long gap@(LongGapBands.Count == 1 ? "" : "s")
-                        · @PerformanceRevisionMarkers.Count revision change@(PerformanceRevisionMarkers.Count == 1 ? "" : "s")
+                        @if (ShowPerformanceRevisionMarkers)
+                        {
+                            <text> · @PerformanceRevisionMarkers.Count revision change@(PerformanceRevisionMarkers.Count == 1 ? "" : "s")</text>
+                        }
                     </summary>
-                    <p>Shaded bands mark gaps where the history line is not connected. Dotted lines mark changes to dotnet/performance.</p>
+                    <p>
+                        Shaded bands mark gaps where the history line is not connected.
+                        @if (ShowPerformanceRevisionMarkers)
+                        {
+                            <text>Dotted lines mark changes to dotnet/performance.</text>
+                        }
+                    </p>
                     <ul>
                         @foreach (var gap in LongGapBands)
                         {
@@ -285,13 +226,16 @@
                                 @gap.Description
                             </li>
                         }
-                        @foreach (var marker in PerformanceRevisionMarkers)
+                        @if (ShowPerformanceRevisionMarkers)
                         {
-                            <li>
-                                Performance revision at
-                                @marker.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture):
-                                @marker.Description
-                            </li>
+                            @foreach (var marker in PerformanceRevisionMarkers)
+                            {
+                                <li>
+                                    Performance revision at
+                                    @marker.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture):
+                                    @marker.Description
+                                </li>
+                            }
                         }
                     </ul>
                 </details>
@@ -306,14 +250,14 @@
                    value="@(_hover?.TimelineIndex ?? Math.Max(0, _hoverIndex.Timestamps.Count - 1))"
                    aria-label="Chart timestamp"
                    aria-valuetext="@KeyboardValueText"
-                   aria-describedby="@(_hover is null ? "chart-hover-instructions" : "chart-hover-instructions chart-hover-card")"
+                   aria-describedby="@(_hover is null ? HoverInstructionsId : $"{HoverInstructionsId} {HoverCardId}")"
                    @onfocus="OnScrubberFocus"
                    @onblur="OnScrubberBlur"
                    @oninput="OnScrubberInput" />
 
             @if (_hover is not null)
             {
-                <aside id="chart-hover-card"
+                <aside id="@HoverCardId"
                        class="hover-card @(_selectionState.IsPinned ? "pinned" : "preview") @(_hoverCardPercent > 63 ? "flip" : null)"
                        style="left:@(_hoverCardPercent.ToString("0.##", CultureInfo.InvariantCulture))%"
                        aria-label="Selected chart observation details">
@@ -441,44 +385,39 @@
 
         @if (InvestigationGuidance is not null)
         {
-            <div class="investigation-guidance" role="status" aria-live="polite">
+            <div class="investigation-guidance @(Compact ? "visually-hidden" : null)" role="status" aria-live="polite">
                 @InvestigationGuidance
             </div>
         }
 
-        <div class="chart-caption">
+        <div class="chart-caption @(Compact ? "visually-hidden" : null)">
             <span>@(Normalized ? "Ratio to the first selected run on strict matches" : "Raw reported primary-trace values")</span>
-            <span id="chart-hover-instructions">
+            <span id="@HoverInstructionsId">
                 Hover or use ←/→, Home, End to preview · click/tap or press Enter/Space to pin · Escape to unpin
             </span>
         </div>
 
-        @if (ShowVariabilityBand)
+        @if (ShowVariabilityBand && !Compact)
         {
             <VariabilityAnalysisPanels Histories="Histories"
                                        Matches="Matches"
                                        Normalized="Normalized"
                                        TimeRange="TimeRange"
+                                       TimelineBounds="TimelineBounds"
                                        Window="VariabilityWindow"
                                        PinnedTimestamp="_selectionState.PinnedTimestamp"
-                                       FocusedRunId="_seriesFocus.FocusedRunId" />
+                                       FocusedRunIds="FocusedRunIds" />
         }
     }
 </div>
 
 @code {
     private const double PlotLeft = 86;
-    private const double PlotTop = 24;
     private const double PlotWidth = 884;
-    private const double PlotHeight = 340;
-
-    private static readonly IReadOnlyList<RangeOption> RangeOptions =
-    [
-        new("30d", HistoryTimeRange.ThirtyDays),
-        new("90d", HistoryTimeRange.NinetyDays),
-        new("1y", HistoryTimeRange.OneYear),
-        new("All", HistoryTimeRange.All)
-    ];
+    private double PlotTop => Compact ? 10 : 24;
+    private double PlotHeight => Compact ? 132 : 340;
+    private double ViewHeight => PlotTop + PlotHeight + (Compact ? (ShowTimeAxis ? 30 : 10) : 66);
+    private int YTickCount => Compact ? 2 : 4;
 
     [Parameter, EditorRequired]
     public IReadOnlyList<BenchmarkHistory> Histories { get; set; } = [];
@@ -493,20 +432,32 @@
     public HistoryTimeRange TimeRange { get; set; } = HistoryTimeRange.All;
 
     [Parameter]
+    public (DateTime Start, DateTime End)? TimelineBounds { get; set; }
+
+    [Parameter]
     public EventCallback<HistoryTimeRange> TimeRangeChanged { get; set; }
 
     [Parameter]
     public bool ShowVariabilityBand { get; set; }
 
     [Parameter]
-    public EventCallback<bool> ShowVariabilityBandChanged { get; set; }
+    public bool ShowPerformanceRevisionMarkers { get; set; }
+
+    /// <summary>Run ids emphasized across the stack; other series fade when any are set.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string>? FocusedRunIds { get; set; }
+
+    /// <summary>Short stacked-row geometry; notes stay available to assistive technology only.</summary>
+    [Parameter]
+    public bool Compact { get; set; }
+
+    /// <summary>Draws date labels in compact mode (the bottom row of a stack).</summary>
+    [Parameter]
+    public bool ShowTimeAxis { get; set; } = true;
 
     [Parameter]
     public int VariabilityWindow { get; set; } =
         RollingVariabilityCalculator.DefaultWindow;
-
-    [Parameter]
-    public EventCallback<int> VariabilityWindowChanged { get; set; }
 
     [Parameter]
     public InvestigationPin? BaselinePin { get; set; }
@@ -530,7 +481,6 @@
     private IReadOnlyList<HitRegion> _hitRegions = [];
     private ChartHoverIndex _hoverIndex = new([], [], false);
     private readonly ChartSelectionState _selectionState = new();
-    private readonly ChartSeriesFocusState _seriesFocus = new();
     private ChartHoverSelection? _hover;
     private long _minTicks;
     private long _maxTicks;
@@ -541,21 +491,28 @@
     private DateTime _visibleStart;
     private DateTime _visibleEnd;
     private bool _hasKeyboardFocus;
+    private bool _suppressScrubberPreview;
     private bool _pointerInside;
     private bool _needsDragInitialization;
     private string? _selectionScope;
+    private readonly string _instanceId = $"history-{Guid.NewGuid():N}";
+    private string DirectNoteId => $"{_instanceId}-direct-note";
+    private string AnnotationNoteId => $"{_instanceId}-annotation-note";
+    private string HoverInstructionsId => $"{_instanceId}-hover-instructions";
+    private string HoverCardId => $"{_instanceId}-hover-card";
 
     private IReadOnlyList<ChartSeries> Series => _series;
     private IReadOnlyList<ChartGapBand> LongGapBands => _longGapBands;
     private IReadOnlyList<PerformanceRevisionMarker> PerformanceRevisionMarkers =>
         _performanceRevisionMarkers;
 
+    private bool HasVisibleAnnotations =>
+        LongGapBands.Count > 0 || ShowPerformanceRevisionMarkers && PerformanceRevisionMarkers.Count > 0;
+
     private string ChartDescriptionIds =>
-        "chart-hover-instructions"
-        + (DirectCount > 0 ? " direct-snapshot-note" : "")
-        + (LongGapBands.Count > 0 || PerformanceRevisionMarkers.Count > 0
-            ? " chart-annotation-note"
-            : "");
+        HoverInstructionsId
+        + (DirectCount > 0 ? $" {DirectNoteId}" : "")
+        + (HasVisibleAnnotations ? $" {AnnotationNoteId}" : "");
 
     private int DirectCount => Histories.Sum(history =>
         history.Observations.Count(observation => observation.Source == ObservationSource.DirectSnapshot));
@@ -618,13 +575,12 @@
             _performanceRevisionMarkers = [];
             _hoverIndex = new([], [], Normalized);
             _selectionState.Reset();
-            _seriesFocus.ShowAll();
             _hover = null;
             return;
         }
 
-        _availableMinimum = allTimestamps.Min();
-        _availableMaximum = allTimestamps.Max();
+        _availableMinimum = TimelineBounds?.Start ?? allTimestamps.Min();
+        _availableMaximum = TimelineBounds?.End ?? allTimestamps.Max();
         var visibleRange = TimeRange.Resolve(_availableMinimum, _availableMaximum);
         _visibleStart = visibleRange.Start;
         _visibleEnd = visibleRange.End;
@@ -658,15 +614,14 @@
         _series = BuildSeries();
         _longGapBands = BuildLongGapBands(_series);
         _performanceRevisionMarkers = BuildPerformanceRevisionMarkers(_series);
-        _seriesFocus.Reconcile(_series.Select(series => series.History.Run.Id));
         if (_series.Count == 0)
         {
             return;
         }
 
         var points = _series.SelectMany(series => series.Points).ToArray();
-        _minTicks = points.Min(point => point.Timestamp.Ticks);
-        _maxTicks = points.Max(point => point.Timestamp.Ticks);
+        _minTicks = TimelineBounds is null ? points.Min(point => point.Timestamp.Ticks) : visibleRange.Start.Ticks;
+        _maxTicks = TimelineBounds is null ? points.Max(point => point.Timestamp.Ticks) : visibleRange.End.Ticks;
         if (_maxTicks == _minTicks)
         {
             _maxTicks += TimeSpan.TicksPerDay;
@@ -756,6 +711,16 @@
         RefreshDisplayedSelection();
         StateHasChanged();
         return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public void DismissHover()
+    {
+        _hasKeyboardFocus = false;
+        _pointerInside = false;
+        _selectionState.Reset();
+        RefreshDisplayedSelection();
+        StateHasChanged();
     }
 
     [JSInvokable]
@@ -994,26 +959,11 @@
                 ? point.Value.ToString("0.000×", CultureInfo.InvariantCulture)
                 : DurationFormatter.FormatExactNanoseconds(point.Value));
 
-    private void ToggleSeriesFocus(string runId) => _seriesFocus.Toggle(runId);
+    private string? SeriesFocusClass(string runId) =>
+        FocusedRunIds is not { Count: > 0 }
+            ? null
+            : FocusedRunIds.Contains(runId) ? "is-focused" : "is-dimmed";
 
-    private void ShowAllSeries() => _seriesFocus.ShowAll();
-
-    private string SeriesFocusClass(string runId) =>
-        _seriesFocus.IsFocused(runId)
-            ? "is-focused"
-            : _seriesFocus.IsDimmed(runId)
-                ? "is-dimmed"
-                : "";
-
-    private string LegendFocusLabel(ChartSeries series) =>
-        _seriesFocus.IsFocused(series.History.Run.Id)
-            ? $"Show all series; {series.History.Run.DisplayName} is focused"
-            : $"Focus {series.History.Run.DisplayName}";
-
-    private string SeriesFocusStatus =>
-        _seriesFocus.FocusedRunId is null
-            ? "All chart series shown"
-            : $"{Series.First(series => series.History.Run.Id == _seriesFocus.FocusedRunId).History.Run.DisplayName} focused; other series dimmed";
 
     private IReadOnlyList<HitRegion> BuildHitRegions()
     {
@@ -1063,6 +1013,12 @@
     private void OnScrubberFocus()
     {
         _hasKeyboardFocus = true;
+        if (_suppressScrubberPreview)
+        {
+            _suppressScrubberPreview = false;
+            return;
+        }
+
         if (_selectionState.DisplayTimestamp is null
             && _hoverIndex.Timestamps.Count > 0)
         {
@@ -1133,6 +1089,7 @@
         RefreshDisplayedSelection();
         StateHasChanged();
         await Task.Yield();
+        _suppressScrubberPreview = true;
         await _scrubberElement.FocusAsync(preventScroll: true);
     }
 
@@ -1140,26 +1097,6 @@
     {
         _hover = null;
         await TimeRangeChanged.InvokeAsync(range);
-    }
-
-    private Task ResetRangeAsync() => ChangeRangeAsync(HistoryTimeRange.All);
-
-    private Task OnVariabilityBandChanged(ChangeEventArgs eventArgs) =>
-        ShowVariabilityBandChanged.InvokeAsync(eventArgs.Value is true);
-
-    private Task OnVariabilityWindowChanged(ChangeEventArgs eventArgs)
-    {
-        if (int.TryParse(
-                eventArgs.Value?.ToString(),
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var window)
-            && RollingVariabilityCalculator.IsSupportedWindow(window))
-        {
-            return VariabilityWindowChanged.InvokeAsync(window);
-        }
-
-        return Task.CompletedTask;
     }
 
     private string FormatAxisValue(double value) =>
@@ -1182,13 +1119,6 @@
             ? $"{gap.TotalDays.ToString("0.#", CultureInfo.InvariantCulture)} days"
             : $"{gap.TotalHours.ToString("0.#", CultureInfo.InvariantCulture)} hours";
 
-    private static string DirectSuffix(BenchmarkHistory history)
-    {
-        var count = history.Observations.Count(
-            observation => observation.Source == ObservationSource.DirectSnapshot);
-        return count == 0 ? "" : $" · {count:N0} fallback";
-    }
-
     public async ValueTask DisposeAsync()
     {
         try
@@ -1210,8 +1140,6 @@
 
         _selfReference?.Dispose();
     }
-
-    private sealed record RangeOption(string Label, HistoryTimeRange Range);
 
     private sealed record ChartPoint(DateTime Timestamp, double Value, ObservationSource Source);
 

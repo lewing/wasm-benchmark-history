@@ -6,9 +6,11 @@ namespace WasmBenchmarkHistory.Tests;
 
 public sealed class LiveChangeSetSmokeTests
 {
-    [Fact]
+    [Theory]
+    [InlineData(79296, 21, 10)]
+    [InlineData(83138, 25, 8)]
     [Trait("Category", "Live")]
-    public async Task Issue79296_ImportsAndAnalyzesOneHistory()
+    public async Task Issue_ImportsAndAnalyzesOneHistory(int issueNumber, int benchmarkCount, int groupCount)
     {
         if (Environment.GetEnvironmentVariable("RUN_LIVE_CHANGE_SET_SMOKE") != "1")
         {
@@ -30,11 +32,11 @@ public sealed class LiveChangeSetSmokeTests
         github.DefaultRequestHeaders.UserAgent.ParseAdd("wasm-benchmark-history-smoke/1.0");
         github.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         var payload = await new PerfAutofilingIssueClient(github, githubOptions)
-            .LoadAsync(new PerfIssueReference(79296));
+            .LoadAsync(new PerfIssueReference(issueNumber));
         var document = new ChangeSetIssueParser().Parse(payload);
 
-        Assert.Equal(21, document.BenchmarkCount);
-        Assert.Equal(10, document.Groups.Count);
+        Assert.Equal(benchmarkCount, document.BenchmarkCount);
+        Assert.Equal(groupCount, document.Groups.Count);
         var group = document.Groups[0];
         var row = group.Rows[0];
 

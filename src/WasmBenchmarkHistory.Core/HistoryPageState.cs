@@ -12,7 +12,11 @@ public sealed record HistoryPageState(
     ObservationIdentity? ComparisonB,
     bool UseRobustSummary,
     bool ShowVariabilityBand = false,
-    int VariabilityWindow = RollingVariabilityCalculator.DefaultWindow);
+    int VariabilityWindow = RollingVariabilityCalculator.DefaultWindow,
+    IReadOnlyList<string>? SelectedBenchmarks = null,
+    IReadOnlyList<string>? FocusedRunIds = null,
+    string? BaselineRunId = null,
+    string? ComparisonRunId = null);
 
 public sealed record HistoryPageStateParseResult(
     HistoryPageState State,
@@ -44,7 +48,30 @@ public static class HistoryPageStateCodec
             benchmark = null;
         }
 
+        var selectedBenchmarks = new List<string>();
+        if (values.TryGetValue("selected", out var selected))
+        {
+            foreach (var name in selected.Distinct(StringComparer.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(name) || name.Length > MaximumBenchmarkLength)
+                {
+                    warnings.Add("An invalid shared benchmark selection was ignored.");
+                }
+                else
+                {
+                    selectedBenchmarks.Add(name);
+                }
+            }
+        }
+
+        benchmark ??= selectedBenchmarks.FirstOrDefault();
+        if (benchmark is not null && !selectedBenchmarks.Contains(benchmark, StringComparer.Ordinal))
+        {
+            selectedBenchmarks.Insert(0, benchmark);
+        }
+
         var runIds = ParseRuns(GetSingle(values, "runs", warnings), warnings);
+        var focusedRunIds = ParseFocus(GetSingle(values, "focus", warnings), runIds, warnings);
         var normalized = ParseMode(GetSingle(values, "mode", warnings), warnings);
         var timeRange = ParseRange(values, warnings);
         var investigationRunId = GetSingle(values, "investigate", warnings);
@@ -80,11 +107,15 @@ public static class HistoryPageStateCodec
                 normalized,
                 timeRange,
                 investigationRunId,
-                baseline,
-                comparison,
+                baseline.Identity,
+                comparison.Identity,
                 robust,
                 showVariabilityBand,
-                variabilityWindow),
+                variabilityWindow,
+                selectedBenchmarks,
+                focusedRunIds,
+                baseline.RunId,
+                comparison.RunId),
             warnings);
     }
 
@@ -92,9 +123,21 @@ public static class HistoryPageStateCodec
     {
         var values = new List<KeyValuePair<string, string>>();
         Add(values, "benchmark", state.Benchmark);
+        if (state.SelectedBenchmarks is { Count: > 1 })
+        {
+            foreach (var benchmark in state.SelectedBenchmarks.Distinct(StringComparer.Ordinal))
+            {
+                Add(values, "selected", benchmark);
+            }
+        }
         if (state.RunIds.Count > 0)
         {
             Add(values, "runs", string.Join(',', state.RunIds));
+        }
+
+        if (state.FocusedRunIds is { Count: > 0 })
+        {
+            Add(values, "focus", string.Join(',', state.FocusedRunIds.Distinct(StringComparer.Ordinal)));
         }
 
         Add(values, "mode", state.Normalized ? "normalized" : "raw");
@@ -106,8 +149,8 @@ public static class HistoryPageStateCodec
         }
 
         Add(values, "investigate", state.InvestigationRunId);
-        Add(values, "a", FormatPin(state.BaselineA));
-        Add(values, "b", FormatPin(state.ComparisonB));
+        Add(values, "a", FormatPin(state.BaselineA, state.BaselineRunId));
+        Add(values, "b", FormatPin(state.ComparisonB, state.ComparisonRunId));
         Add(values, "summary", state.UseRobustSummary ? "robust" : "point");
         if (state.ShowVariabilityBand)
         {
@@ -196,6 +239,30 @@ public static class HistoryPageStateCodec
         }
 
         return runIds;
+    }
+
+    private static IReadOnlyList<string> ParseFocus(
+        string? value,
+        IReadOnlyList<string> runIds,
+        List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var focused = value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (focused.Any(id => !KnownRunConfigurations.All.Any(run => run.Id == id))
+            || runIds.Count > 0 && focused.Any(id => !runIds.Contains(id, StringComparer.Ordinal)))
+        {
+            warnings.Add("The shared run focus is invalid and was ignored.");
+            return [];
+        }
+
+        return focused;
     }
 
     private static bool ParseMode(string? value, List<string> warnings)
@@ -307,7 +374,7 @@ public static class HistoryPageStateCodec
         return HistoryTimeRange.All;
     }
 
-    private static ObservationIdentity? ParsePin(
+    private static (ObservationIdentity? Identity, string? RunId) ParsePin(
         string? value,
         string label,
         string? investigationRunId,
@@ -315,27 +382,45 @@ public static class HistoryPageStateCodec
     {
         if (value is null)
         {
-            return null;
-        }
-
-        if (investigationRunId is null)
-        {
-            warnings.Add($"The shared {label} pin had no valid investigation run and was ignored.");
-            return null;
+            return (null, null);
         }
 
         var parts = value.Split('.', StringSplitOptions.None);
-        var timestamp = parts.Length == 3 ? ParseTicks(parts[0]) : null;
-        if (parts.Length != 3
-            || timestamp is null
-            || !GitHubCompareLinkBuilder.IsValidSha(parts[1])
-            || !GitHubCompareLinkBuilder.IsValidSha(parts[2]))
+        var hasRunId = parts.Length == 4;
+        var runId = hasRunId ? parts[0] : investigationRunId;
+        var timestamp = ParseTicks(parts[hasRunId ? 1 : 0]);
+        var runtimeSha = parts.Length switch
         {
-            warnings.Add($"The shared {label} pin is invalid and was ignored.");
-            return null;
+            3 => parts[1],
+            4 => parts[2],
+            _ => null
+        };
+        var performanceSha = parts.Length switch
+        {
+            3 => parts[2],
+            4 => parts[3],
+            _ => null
+        };
+        if (runId is null)
+        {
+            warnings.Add($"The shared {label} pin had no valid source run and was ignored.");
+            return (null, null);
         }
 
-        return new ObservationIdentity(timestamp.Value, parts[1], parts[2]);
+        if (!KnownRunConfigurations.All.Any(run => run.Id == runId)
+            || timestamp is null
+            || runtimeSha is null
+            || performanceSha is null
+            || !GitHubCompareLinkBuilder.IsValidSha(runtimeSha)
+            || !GitHubCompareLinkBuilder.IsValidSha(performanceSha))
+        {
+            warnings.Add($"The shared {label} pin is invalid and was ignored.");
+            return (null, null);
+        }
+
+        return (
+            new ObservationIdentity(timestamp.Value, runtimeSha, performanceSha),
+            runId);
     }
 
     private static DateTime? ParseTicks(string? value)
@@ -360,16 +445,20 @@ public static class HistoryPageStateCodec
         _ => "all"
     };
 
-    private static string? FormatPin(ObservationIdentity? identity) =>
+    private static string? FormatPin(ObservationIdentity? identity, string? runId) =>
         identity is null
             || !GitHubCompareLinkBuilder.IsValidSha(identity.Value.RuntimeSha)
             || !GitHubCompareLinkBuilder.IsValidSha(identity.Value.PerformanceSha)
             ? null
             : string.Join(
                 '.',
-                identity.Value.Timestamp.Ticks.ToString(CultureInfo.InvariantCulture),
-                identity.Value.RuntimeSha,
-                identity.Value.PerformanceSha);
+                new[]
+                {
+                    runId,
+                    identity.Value.Timestamp.Ticks.ToString(CultureInfo.InvariantCulture),
+                    identity.Value.RuntimeSha,
+                    identity.Value.PerformanceSha
+                }.Where(part => !string.IsNullOrEmpty(part)));
 
     private static string Decode(string value)
     {
