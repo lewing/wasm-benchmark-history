@@ -17,6 +17,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\WasmBenchmarkHistory\Components\HistoryChart.razor" Link="Components\HistoryChart.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\HistoryChart.razor.css" Link="Components\HistoryChart.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\wwwroot\history-chart.js" Link="wwwroot\history-chart.js" />
     <Content Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor" Link="Pages\SlowdownRanking.razor" />
     <None Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor.css" Link="Pages\SlowdownRanking.razor.css" />
     <Content Include="..\WasmBenchmarkHistory\wwwroot\slowdown-ranking-download.js"

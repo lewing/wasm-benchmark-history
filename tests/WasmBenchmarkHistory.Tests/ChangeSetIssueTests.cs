@@ -121,6 +121,34 @@ public sealed class ChangeSetIssueTests
         Assert.Equal("runtime change", link.Text);
     }
 
+    [Fact]
+    public void ReportAge_WarnsBeforeHelixReportsExpire()
+    {
+        var now = new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero);
+        var regressionDate = new DateTime(2026, 11, 21, 12, 0, 0);
+
+        var warning = ChangeSetReportAge.Warning(regressionDate, now);
+
+        Assert.Contains("4.0 days ago", warning);
+        Assert.Contains("may be expiring or gone", warning);
+        Assert.Contains("KQL fallback", warning);
+    }
+
+    [Fact]
+    public void ReportAge_PromptsEarlyFetchAndOmitsUnknownDates()
+    {
+        var now = new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero);
+        var recentWarning = ChangeSetReportAge.Warning(
+            new DateTime(2026, 11, 23, 12, 0, 0),
+            now);
+
+        Assert.Contains("2.0 days ago", recentWarning);
+        Assert.Contains("Fetch BDN reports now", recentWarning);
+        Assert.DoesNotContain("KQL fallback", recentWarning);
+        Assert.Null(ChangeSetReportAge.Warning(null, now));
+        Assert.Null(ChangeSetReportAge.Warning(DateTime.MinValue, now));
+    }
+
     [Theory]
     [InlineData(.80, .02, false, ReportedSignalQuality.StrongReportedSignal)]
     [InlineData(.95, .02, false, ReportedSignalQuality.Review)]

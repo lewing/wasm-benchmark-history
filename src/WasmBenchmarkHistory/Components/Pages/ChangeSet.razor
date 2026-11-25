@@ -71,6 +71,12 @@
                 @(_document.Metadata.RegressionDate?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
                     ?? "date unavailable")
             </small>
+            @if (ChangeSetReportAge.Warning(
+                _document.Metadata.RegressionDate,
+                DateTimeOffset.UtcNow) is { } reportAgeWarning)
+            {
+                <small class="report-age-warning" role="status">@reportAgeWarning</small>
+            }
         </div>
         @foreach (var run in DistinctRuns)
         {

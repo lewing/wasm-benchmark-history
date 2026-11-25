@@ -29,7 +29,11 @@ another timestamp to move it, or press Escape/use its close button to unpin.
 Choosing **Set baseline A** or **Set comparison B** automatically returns the
 chart to selection mode and focuses the keyboard scrubber, so the next point can
 be previewed and pinned immediately. A short status message states which pin is
-still needed.
+still needed. Shaded bands identify long gaps where the history line is not
+connected; dotted markers identify changes to the dotnet/performance revision.
+Open **Chart annotations** for their dates and revision identities.
+The server and standalone WASM hosts share the chart component, stylesheet,
+and JavaScript through MSBuild links rather than maintaining separate copies.
 
 All app-owned duration displays start from nanoseconds and use adaptive `ps`,
 `ns`, `µs`, `ms`, or `s` units. Each chart axis keeps one stable unit across its
@@ -163,6 +167,8 @@ links, reported values, Test Quality, Edge Detector, and group repro commands.
 It does not render issue HTML or Markdown. External triage is collapsed by
 default and reduced to a plain-text summary plus allowlisted HTTPS links; it is
 explicitly issue commentary rather than analysis produced by this app.
+The run date also shows an age warning so investigators know when to fetch
+short-retention BenchmarkDotNet reports and when to fall back to KQL.
 
 Rows receive a conservative report-fact heuristic:
 

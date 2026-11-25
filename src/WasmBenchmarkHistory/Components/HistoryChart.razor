@@ -104,11 +104,34 @@
                      preserveAspectRatio="none"
                      role="img"
                      aria-label="Historical benchmark line chart"
-                     aria-describedby="@(DirectCount > 0
-                         ? "chart-hover-instructions direct-snapshot-note"
-                         : "chart-hover-instructions")"
+                     aria-describedby="@ChartDescriptionIds"
                      @onpointerleave="OnChartPointerLeave">
                     <rect class="plot-background" x="@PlotLeft" y="@PlotTop" width="@PlotWidth" height="@PlotHeight" rx="8" />
+
+                    @foreach (var gap in LongGapBands)
+                    {
+                        var x = ScaleX(gap.Start.Ticks);
+                        var width = Math.Max(1, ScaleX(gap.End.Ticks) - x);
+                        <rect class="history-gap-band"
+                              x="@x"
+                              y="@PlotTop"
+                              width="@width"
+                              height="@PlotHeight">
+                            <title>@gap.Description</title>
+                        </rect>
+                    }
+
+                    @foreach (var marker in PerformanceRevisionMarkers)
+                    {
+                        var x = ScaleX(marker.Timestamp.Ticks);
+                        <line class="performance-revision-marker"
+                              x1="@x"
+                              y1="@PlotTop"
+                              x2="@x"
+                              y2="@(PlotTop + PlotHeight)">
+                            <title>@marker.Description</title>
+                        </line>
+                    }
 
                     @for (var tick = 0; tick <= 4; tick++)
                     {
@@ -244,6 +267,35 @@
                     }
                 </svg>
             </div>
+
+            @if (LongGapBands.Count > 0 || PerformanceRevisionMarkers.Count > 0)
+            {
+                <details id="chart-annotation-note" class="chart-annotations">
+                    <summary>
+                        Chart annotations · @LongGapBands.Count long gap@(LongGapBands.Count == 1 ? "" : "s")
+                        · @PerformanceRevisionMarkers.Count revision change@(PerformanceRevisionMarkers.Count == 1 ? "" : "s")
+                    </summary>
+                    <p>Shaded bands mark gaps where the history line is not connected. Dotted lines mark changes to dotnet/performance.</p>
+                    <ul>
+                        @foreach (var gap in LongGapBands)
+                        {
+                            <li>
+                                Long gap, @gap.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                                → @gap.End.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture):
+                                @gap.Description
+                            </li>
+                        }
+                        @foreach (var marker in PerformanceRevisionMarkers)
+                        {
+                            <li>
+                                Performance revision at
+                                @marker.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture):
+                                @marker.Description
+                            </li>
+                        }
+                    </ul>
+                </details>
+            }
 
             <input @ref="_scrubberElement"
                    class="keyboard-scrubber"
@@ -473,6 +525,8 @@
     private IReadOnlyList<BenchmarkHistory> _visibleHistories = [];
     private IReadOnlyList<MatchedComparison> _visibleMatches = [];
     private IReadOnlyList<ChartSeries> _series = [];
+    private IReadOnlyList<ChartGapBand> _longGapBands = [];
+    private IReadOnlyList<PerformanceRevisionMarker> _performanceRevisionMarkers = [];
     private IReadOnlyList<HitRegion> _hitRegions = [];
     private ChartHoverIndex _hoverIndex = new([], [], false);
     private readonly ChartSelectionState _selectionState = new();
@@ -492,6 +546,17 @@
     private string? _selectionScope;
 
     private IReadOnlyList<ChartSeries> Series => _series;
+    private IReadOnlyList<ChartGapBand> LongGapBands => _longGapBands;
+    private IReadOnlyList<PerformanceRevisionMarker> PerformanceRevisionMarkers =>
+        _performanceRevisionMarkers;
+
+    private string ChartDescriptionIds =>
+        "chart-hover-instructions"
+        + (DirectCount > 0 ? " direct-snapshot-note" : "")
+        + (LongGapBands.Count > 0 || PerformanceRevisionMarkers.Count > 0
+            ? " chart-annotation-note"
+            : "");
+
     private int DirectCount => Histories.Sum(history =>
         history.Observations.Count(observation => observation.Source == ObservationSource.DirectSnapshot));
 
@@ -549,6 +614,8 @@
             _visibleHistories = [];
             _visibleMatches = [];
             _series = [];
+            _longGapBands = [];
+            _performanceRevisionMarkers = [];
             _hoverIndex = new([], [], Normalized);
             _selectionState.Reset();
             _seriesFocus.ShowAll();
@@ -589,6 +656,8 @@
         _selectionState.Reconcile(_hoverIndex.Timestamps);
         RefreshDisplayedSelection();
         _series = BuildSeries();
+        _longGapBands = BuildLongGapBands(_series);
+        _performanceRevisionMarkers = BuildPerformanceRevisionMarkers(_series);
         _seriesFocus.Reconcile(_series.Select(series => series.History.Run.Id));
         if (_series.Count == 0)
         {
@@ -624,7 +693,7 @@
         _needsDragInitialization = false;
         _module ??= await JS.InvokeAsync<IJSObjectReference>(
             "import",
-            "./Components/HistoryChart.razor.js");
+            "./history-chart.js");
         if (_dragHandle is not null)
         {
             await _dragHandle.InvokeVoidAsync("dispose");
@@ -738,6 +807,73 @@
             .Where(series => series.Points.Count > 0)
             .ToArray();
     }
+
+    private static IReadOnlyList<ChartGapBand> BuildLongGapBands(
+        IReadOnlyList<ChartSeries> series) =>
+        series
+            .SelectMany(item =>
+                new[] { ObservationSource.PublishedHistory, ObservationSource.DirectSnapshot }
+                    .SelectMany(source =>
+                    {
+                        var segments = TimeSeriesSegmenter.SplitAtLongGaps(
+                            item.Points.Where(point => point.Source == source).ToArray(),
+                            point => point.Timestamp);
+                        return segments
+                            .Zip(segments.Skip(1))
+                            .Select(pair => new
+                            {
+                                Start = pair.First[^1].Timestamp,
+                                End = pair.Second[0].Timestamp,
+                                Source = source,
+                                Run = item.History.Run.DisplayName
+                            });
+                    }))
+            .GroupBy(gap => (gap.Start, gap.End, gap.Source))
+            .Select(group => new ChartGapBand(
+                group.Key.Start,
+                group.Key.End,
+                $"No {(group.Key.Source == ObservationSource.PublishedHistory ? "published" : "fallback")} "
+                + $"observations for {FormatGap(group.Key.End - group.Key.Start)} in "
+                + $"{string.Join(", ", group.Select(gap => gap.Run).Distinct(StringComparer.Ordinal))}. "
+                + "The history line is not connected across this gap."))
+            .OrderBy(gap => gap.Start)
+            .ToArray();
+
+    private static IReadOnlyList<PerformanceRevisionMarker> BuildPerformanceRevisionMarkers(
+        IReadOnlyList<ChartSeries> series) =>
+        series
+            .SelectMany(item =>
+            {
+                var displayedPoints = item.Points
+                    .Select(point => (point.Timestamp, point.Source))
+                    .ToHashSet();
+                var observations = item.History.Observations
+                    .Where(observation => displayedPoints.Contains((observation.Timestamp, observation.Source)))
+                    .OrderBy(observation => observation.Timestamp)
+                    .ToArray();
+                return observations
+                    .Zip(observations.Skip(1))
+                    .Where(pair =>
+                        !string.IsNullOrEmpty(pair.First.PerformanceSha)
+                        && !string.IsNullOrEmpty(pair.Second.PerformanceSha)
+                        && !string.Equals(
+                            pair.First.PerformanceSha,
+                            pair.Second.PerformanceSha,
+                            StringComparison.OrdinalIgnoreCase))
+                    .Select(pair => new
+                    {
+                        pair.Second.Timestamp,
+                        Description = $"{item.History.Run.DisplayName}: dotnet/performance "
+                            + $"{ShortSha(pair.First.PerformanceSha)} → {ShortSha(pair.Second.PerformanceSha)}"
+                    });
+            })
+            .GroupBy(marker => marker.Timestamp)
+            .Select(group => new PerformanceRevisionMarker(
+                group.Key,
+                "dotnet/performance revision changed: "
+                + string.Join("; ", group.Select(marker => marker.Description).Distinct(StringComparer.Ordinal))))
+            .OrderBy(marker => marker.Timestamp)
+            .ToArray();
 
     private ChartSeries CreateSeries(
         BenchmarkHistory history,
@@ -1041,6 +1177,11 @@
             ? value.ToString("0.##", CultureInfo.InvariantCulture) + "%"
             : "—";
 
+    private static string FormatGap(TimeSpan gap) =>
+        gap.TotalDays >= 1
+            ? $"{gap.TotalDays.ToString("0.#", CultureInfo.InvariantCulture)} days"
+            : $"{gap.TotalHours.ToString("0.#", CultureInfo.InvariantCulture)} hours";
+
     private static string DirectSuffix(BenchmarkHistory history)
     {
         var count = history.Observations.Count(
@@ -1073,6 +1214,10 @@
     private sealed record RangeOption(string Label, HistoryTimeRange Range);
 
     private sealed record ChartPoint(DateTime Timestamp, double Value, ObservationSource Source);
+
+    private sealed record ChartGapBand(DateTime Start, DateTime End, string Description);
+
+    private sealed record PerformanceRevisionMarker(DateTime Timestamp, string Description);
 
     private sealed record HitRegion(int TimelineIndex, double X, double Width);
 
