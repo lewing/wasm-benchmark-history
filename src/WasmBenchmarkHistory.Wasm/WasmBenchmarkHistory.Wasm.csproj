@@ -17,6 +17,20 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\WasmBenchmarkHistory\Components\Pages\Home.razor" Link="Pages\Home.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\Pages\Home.razor.css" Link="Pages\Home.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\wwwroot\benchmark-tree.js" Link="wwwroot\benchmark-tree.js" />
+    <Content Include="..\WasmBenchmarkHistory\Components\VariabilityAnalysisPanels.razor" Link="Components\VariabilityAnalysisPanels.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\VariabilityAnalysisPanels.razor.css" Link="Components\VariabilityAnalysisPanels.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\Components\RegressionInvestigationPanel.razor" Link="Components\RegressionInvestigationPanel.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\RegressionInvestigationPanel.razor.css" Link="Components\RegressionInvestigationPanel.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\Components\HistoryChart.razor" Link="Components\HistoryChart.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\HistoryChart.razor.css" Link="Components\HistoryChart.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\Components\HistoryChartToolbar.razor" Link="Components\HistoryChartToolbar.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\HistoryChartToolbar.razor.css" Link="Components\HistoryChartToolbar.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\Components\RunVisibilityToggles.razor" Link="Components\RunVisibilityToggles.razor" />
+    <None Include="..\WasmBenchmarkHistory\Components\RunVisibilityToggles.razor.css" Link="Components\RunVisibilityToggles.razor.css" />
+    <Content Include="..\WasmBenchmarkHistory\wwwroot\history-chart.js" Link="wwwroot\history-chart.js" />
     <Content Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor" Link="Pages\SlowdownRanking.razor" />
     <None Include="..\WasmBenchmarkHistory\Components\Pages\SlowdownRanking.razor.css" Link="Pages\SlowdownRanking.razor.css" />
     <Content Include="..\WasmBenchmarkHistory\wwwroot\slowdown-ranking-download.js"

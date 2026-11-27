@@ -56,6 +56,57 @@ public sealed class BenchmarkHistoryParserTests
         Assert.Null(history.TraceName);
     }
 
+    [Theory]
+    [InlineData("Regressions")]
+    [InlineData("Improvements")]
+    [InlineData("Unchanged")]
+    public void Parse_UsesDefaultCounterFromJsonTableData(string category)
+    {
+        const string row = """[{"defaultCounter":{"counterId":8255523016178967850}}]""";
+        var html = $$"""
+            const tableData = {
+                "Regressions": {{(category == "Regressions" ? row : "[]")}},
+                "Improvements": {{(category == "Improvements" ? row : "[]")}},
+                "Unchanged": {{(category == "Unchanged" ? row : "[]")}}
+            };
+            const trendData = {};
+            trendData[123] = [{
+                "x": ["2026-09-01 01:02:03"], "y": [999],
+                "gitHash": { "runtime": ["wrong"] }, "perfRepoHash": ["wrong"]
+            }];
+            trendData[8255523016178967850] = [{
+                "x": ["2026-09-01 01:02:03"], "y": [4.5],
+                "gitHash": { "runtime": ["runtime"] }, "perfRepoHash": ["performance"]
+            }];
+            """;
+
+        var history = new BenchmarkHistoryParser().Parse(
+            "JsonTable.Benchmark", KnownRunConfigurations.All[0], html);
+
+        var observation = Assert.Single(history.Observations);
+        Assert.Equal(4.5, observation.Value);
+        Assert.Equal("runtime", observation.RuntimeSha);
+        Assert.Equal("performance", observation.PerformanceSha);
+    }
+
+    [Fact]
+    public void Parse_RejectsAmbiguousJsonDefaultCounters()
+    {
+        const string html = """
+            const tableData = {"Regressions": [
+                {"defaultCounter": {"counterId": 7}},
+                {"defaultCounter": {"counterId": 8}}
+            ], "Improvements": [], "Unchanged": []};
+            """;
+
+        var exception = Assert.Throws<BenchmarkDataException>(() =>
+            new BenchmarkHistoryParser().Parse(
+                "Ambiguous.Benchmark", KnownRunConfigurations.All[0], html));
+
+        Assert.Equal(BenchmarkDataError.Schema, exception.Error);
+        Assert.Contains("multiple default counters", exception.Message);
+    }
+
     [Fact]
     public void Parse_RejectsMisalignedPrimaryFields()
     {

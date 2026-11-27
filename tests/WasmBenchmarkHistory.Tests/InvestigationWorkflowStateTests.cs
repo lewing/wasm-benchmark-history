@@ -69,6 +69,30 @@ public sealed class InvestigationWorkflowStateTests
         Assert.Equal(Second.Timestamp, workflow.BaselinePin!.Identity.Timestamp);
     }
 
+    [Fact]
+    public void PinsFromDifferentRunsRetainTheirOwnSourceAndCompleteTheInterval()
+    {
+        var workflow = new InvestigationWorkflowState();
+        var otherRun = KnownRunConfigurations.All.Single(run => run.Id == "coreclr-wasm");
+        var comparison = new BenchmarkObservation(
+            "Fixture",
+            otherRun.Id,
+            Second.Timestamp,
+            Second.Value,
+            Second.Error,
+            Second.RuntimeSha,
+            Second.PerformanceSha,
+            Second.TraceName);
+
+        workflow.Set(Request(InvestigationPinSlot.BaselineA, First));
+        workflow.Set(Request(InvestigationPinSlot.ComparisonB, comparison));
+
+        Assert.True(workflow.HasComparison);
+        Assert.Null(workflow.RunId);
+        Assert.Equal(First.RunId, workflow.BaselinePin!.RunId);
+        Assert.Equal(otherRun.Id, workflow.ComparisonPin!.RunId);
+    }
+
     private static InvestigationPinRequest Request(
         InvestigationPinSlot slot,
         BenchmarkObservation observation) =>

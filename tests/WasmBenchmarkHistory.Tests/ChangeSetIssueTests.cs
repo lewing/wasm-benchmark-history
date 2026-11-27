@@ -89,6 +89,45 @@ public sealed class ChangeSetIssueTests
         Assert.Contains("source link", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("\"")]
+    [InlineData("'")]
+    public void Parser_ReadsHtmlHistoryLinksWithCounterQuery(string quote)
+    {
+        var document = new ChangeSetIssueParser().Parse(Payload(HtmlHistoryFixture(quote), []));
+        var row = document.Groups[0].Rows[0];
+
+        Assert.Equal(ParseFixture().Groups[0].Rows[0].Benchmark, row.Benchmark);
+        Assert.Equal("Run/Case", row.DisplayName);
+        Assert.Equal("?counter=Duration%20of%20single%20invocation", row.HistoryUri.Query);
+        Assert.NotNull(row.SourceUri);
+    }
+
+    [Fact]
+    public void Parser_RejectsUnsafeHtmlHistoryLinks()
+    {
+        var body = HtmlHistoryFixture("\"").Replace(
+            "<a href=\"https://pvscmdupload.z22.web.core.windows.net/",
+            "<a href=\"https://example.com/",
+            StringComparison.Ordinal);
+
+        var exception = Assert.Throws<PerfIssueException>(
+            () => new ChangeSetIssueParser().Parse(Payload(body, [])));
+
+        Assert.Contains("history link", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string HtmlHistoryFixture(string quote)
+    {
+        var body = Fixture.Read("autofile-issue.md");
+        var original = body.Split('\n').First(line => line.StartsWith("|<ul>", StringComparison.Ordinal));
+        var history = ParseFixture().Groups[0].Rows[0].HistoryUri.AbsoluteUri;
+        var replacement = $"|<ul><li><a href={quote}{history}?counter=Duration%20of%20single%20invocation{quote}>"
+            + "Run/Case \u2014 Duration of single invocation</a>"
+            + original[original.IndexOf("</li>", StringComparison.Ordinal)..];
+        return body.Replace(original, replacement, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Parser_RejectsRuntimeDiffThatDoesNotMatchDisplayedShas()
     {
@@ -119,6 +158,34 @@ public sealed class ChangeSetIssueTests
         var link = Assert.Single(summary.Links);
         Assert.Equal("github.com", link.Uri.Host);
         Assert.Equal("runtime change", link.Text);
+    }
+
+    [Fact]
+    public void ReportAge_WarnsBeforeHelixReportsExpire()
+    {
+        var now = new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero);
+        var regressionDate = new DateTime(2026, 11, 21, 12, 0, 0);
+
+        var warning = ChangeSetReportAge.Warning(regressionDate, now);
+
+        Assert.Contains("4.0 days ago", warning);
+        Assert.Contains("may be expiring or gone", warning);
+        Assert.Contains("KQL fallback", warning);
+    }
+
+    [Fact]
+    public void ReportAge_PromptsEarlyFetchAndOmitsUnknownDates()
+    {
+        var now = new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero);
+        var recentWarning = ChangeSetReportAge.Warning(
+            new DateTime(2026, 11, 23, 12, 0, 0),
+            now);
+
+        Assert.Contains("2.0 days ago", recentWarning);
+        Assert.Contains("Fetch BDN reports now", recentWarning);
+        Assert.DoesNotContain("KQL fallback", recentWarning);
+        Assert.Null(ChangeSetReportAge.Warning(null, now));
+        Assert.Null(ChangeSetReportAge.Warning(DateTime.MinValue, now));
     }
 
     [Theory]

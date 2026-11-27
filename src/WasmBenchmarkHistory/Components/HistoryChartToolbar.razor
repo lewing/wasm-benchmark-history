@@ -1,0 +1,94 @@
+<div class="chart-toolbar">
+    <fieldset>
+        <legend>Time range</legend>
+        @foreach (var option in RangeOptions)
+        {
+            <button type="button"
+                    class="@(TimeRange.Kind == option.Range.Kind ? "active" : null)"
+                    aria-pressed="@(TimeRange.Kind == option.Range.Kind ? "true" : "false")"
+                    @onclick="() => TimeRangeChanged.InvokeAsync(option.Range)">
+                @option.Label
+            </button>
+        }
+        <button type="button"
+                class="reset-range"
+                disabled="@(TimeRange.Kind == HistoryRangeKind.All)"
+                @onclick="() => TimeRangeChanged.InvokeAsync(HistoryTimeRange.All)">
+            Reset
+        </button>
+    </fieldset>
+    <fieldset class="band-controls">
+        <legend>Variability</legend>
+        <label>
+            <input type="checkbox"
+                   checked="@ShowVariabilityBand"
+                   @onchange="e => ShowVariabilityBandChanged.InvokeAsync(e.Value is true)" />
+            Variability analysis
+        </label>
+        <select value="@VariabilityWindow"
+                disabled="@(!ShowVariabilityBand)"
+                aria-label="Variability band observation window"
+                @onchange="OnVariabilityWindowChanged">
+            @foreach (var window in RollingVariabilityCalculator.SupportedWindows)
+            {
+                <option value="@window">@window observations</option>
+            }
+        </select>
+    </fieldset>
+    <fieldset class="annotation-controls">
+        <legend>Annotations</legend>
+        <label>
+            <input type="checkbox"
+                   checked="@ShowPerformanceRevisionMarkers"
+                   @onchange="e => ShowPerformanceRevisionMarkersChanged.InvokeAsync(e.Value is true)" />
+            Performance revisions
+        </label>
+    </fieldset>
+    <span class="zoom-help">
+        @(TimeRange.Kind == HistoryRangeKind.Custom
+            ? $"{TimeRange.Start:yyyy-MM-dd} – {TimeRange.End:yyyy-MM-dd}"
+            : ShowVariabilityBand
+                ? $"Aligned {VariabilityWindow}-observation median/IQR and relative-IQR panels"
+                : "Drag across a plot to zoom")
+    </span>
+</div>
+
+@code {
+    private static readonly IReadOnlyList<(string Label, HistoryTimeRange Range)> RangeOptions =
+    [
+        ("30d", HistoryTimeRange.ThirtyDays),
+        ("90d", HistoryTimeRange.NinetyDays),
+        ("1y", HistoryTimeRange.OneYear),
+        ("All", HistoryTimeRange.All)
+    ];
+
+    [Parameter]
+    public HistoryTimeRange TimeRange { get; set; } = HistoryTimeRange.All;
+
+    [Parameter]
+    public EventCallback<HistoryTimeRange> TimeRangeChanged { get; set; }
+
+    [Parameter]
+    public bool ShowVariabilityBand { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> ShowVariabilityBandChanged { get; set; }
+
+    [Parameter]
+    public int VariabilityWindow { get; set; } = RollingVariabilityCalculator.DefaultWindow;
+
+    [Parameter]
+    public EventCallback<int> VariabilityWindowChanged { get; set; }
+
+    [Parameter]
+    public bool ShowPerformanceRevisionMarkers { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> ShowPerformanceRevisionMarkersChanged { get; set; }
+
+    private Task OnVariabilityWindowChanged(ChangeEventArgs eventArgs) =>
+        int.TryParse(eventArgs.Value?.ToString(), out var window)
+            && RollingVariabilityCalculator.IsSupportedWindow(window)
+            ? VariabilityWindowChanged.InvokeAsync(window)
+            : Task.CompletedTask;
+}

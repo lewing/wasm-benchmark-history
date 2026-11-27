@@ -17,64 +17,6 @@
     font-size: .8rem;
 }
 
-.chart-toolbar {
-    align-items: center;
-    border-bottom: 1px solid var(--line);
-    display: flex;
-    gap: 1rem;
-    justify-content: space-between;
-    padding: .8rem 1.2rem;
-}
-
-.chart-toolbar fieldset {
-    align-items: center;
-    border: 0;
-    display: flex;
-    gap: .25rem;
-    margin: 0;
-    padding: 0;
-}
-
-.chart-toolbar .band-controls {
-    gap: .5rem;
-}
-
-.band-controls label {
-    align-items: center;
-    color: var(--muted);
-    cursor: pointer;
-    display: inline-flex;
-    font-size: .62rem;
-    gap: .35rem;
-}
-
-.band-controls input {
-    accent-color: var(--accent);
-}
-
-.band-controls select {
-    background: #0b1527;
-    border: 1px solid var(--line-strong);
-    border-radius: .4rem;
-    color: var(--ink);
-    font: inherit;
-    font-size: .62rem;
-    padding: .3rem .4rem;
-}
-
-.band-controls select:disabled {
-    cursor: not-allowed;
-    opacity: .4;
-}
-
-.chart-toolbar legend {
-    color: var(--muted);
-    float: left;
-    font-size: .62rem;
-    margin-right: .5rem;
-}
-
-.chart-toolbar button,
 .pin-actions button,
 .close-card {
     background: transparent;
@@ -87,118 +29,6 @@
     padding: .32rem .5rem;
 }
 
-.chart-toolbar button:hover,
-.chart-toolbar button.active {
-    background: rgb(100 225 255 / 11%);
-    border-color: rgb(100 225 255 / 42%);
-    color: var(--accent);
-}
-
-.chart-toolbar button:disabled {
-    cursor: not-allowed;
-    opacity: .4;
-}
-
-.chart-toolbar .reset-range {
-    margin-left: .3rem;
-}
-
-.zoom-help {
-    color: var(--muted);
-    font-family: var(--mono);
-    font-size: .6rem;
-}
-
-.legend {
-    align-items: stretch;
-    display: flex;
-    flex-wrap: wrap;
-    gap: .55rem;
-    padding: 1.15rem 1.35rem .5rem;
-}
-
-.legend-item {
-    align-items: center;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: .55rem;
-    color: inherit;
-    cursor: pointer;
-    display: grid;
-    gap: .55rem;
-    grid-template-columns: 2rem auto;
-    padding: .42rem .5rem;
-    text-align: left;
-    transition: background-color 120ms ease-out, border-color 120ms ease-out, opacity 120ms ease-out;
-}
-
-.legend-item:hover,
-.legend-item.is-focused {
-    background: rgb(100 225 255 / 7%);
-    border-color: var(--line-strong);
-}
-
-.legend-item:focus-visible,
-.legend-reset:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
-.legend-copy {
-    display: grid;
-    gap: .15rem;
-}
-
-.legend-symbol {
-    display: block;
-    height: 1rem;
-    position: relative;
-    width: 2rem;
-}
-
-.legend-symbol.published::before,
-.legend-symbol.direct::before {
-    content: "";
-    left: 0;
-    position: absolute;
-    right: 0;
-    top: calc(50% - 1px);
-}
-
-.legend-symbol.published::before {
-    border-top: 2px solid var(--series-color);
-}
-
-.legend-symbol.direct::before {
-    border-top: 2px dashed var(--series-color);
-}
-
-.legend-symbol i {
-    background: var(--series-color);
-    border-radius: 50%;
-    height: .55rem;
-    left: calc(50% - .275rem);
-    position: absolute;
-    top: calc(50% - .275rem);
-    width: .55rem;
-}
-
-.legend-symbol.direct i {
-    border: 1.5px solid var(--ink);
-    border-radius: .08rem;
-    transform: rotate(45deg);
-}
-
-.legend-item strong {
-    font-size: .7rem;
-}
-
-.legend-item small {
-    color: var(--muted);
-    font-size: .6rem;
-}
-
-.legend-item.is-dimmed,
 .series-group.is-dimmed,
 .hover-point.is-dimmed,
 .hover-point-halo.is-dimmed,
@@ -206,20 +36,8 @@
     opacity: .18;
 }
 
-.legend-reset {
-    align-self: center;
-    background: transparent;
-    border: 1px solid var(--line-strong);
-    border-radius: .4rem;
-    color: var(--accent);
-    cursor: pointer;
-    font: inherit;
-    font-size: .62rem;
-    padding: .4rem .55rem;
-}
-
-.legend-reset:hover {
-    background: rgb(100 225 255 / 9%);
+.series-group.is-focused .series-line {
+    stroke-width: 2.6;
 }
 
 .visually-hidden {
@@ -250,6 +68,32 @@ svg {
     width: 100%;
 }
 
+.compact .svg-wrap {
+    min-height: 0;
+}
+
+.compact svg {
+    height: clamp(124px, 13vw, 164px);
+}
+
+.compact.with-axis svg {
+    height: clamp(148px, 15.5vw, 194px);
+}
+
+.sync-crosshair {
+    pointer-events: none;
+    stroke: var(--ink);
+    stroke-dasharray: 3 4;
+    stroke-opacity: .55;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    visibility: hidden;
+}
+
+.sync-crosshair.visible {
+    visibility: visible;
+}
+
 .plot-area:focus-within svg {
     border-radius: .55rem;
     outline: 2px solid var(--accent);
@@ -258,6 +102,41 @@ svg {
 
 .plot-background {
     fill: rgb(3 10 22 / 45%);
+}
+
+.history-gap-band {
+    fill: rgb(132 146 170 / 13%);
+    pointer-events: none;
+}
+
+.performance-revision-marker {
+    pointer-events: none;
+    stroke: rgb(249 213 110 / 68%);
+    stroke-dasharray: 3 5;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
+}
+
+.chart-annotations {
+    color: var(--muted);
+    font-size: .68rem;
+    margin: -.1rem 1.35rem .65rem;
+}
+
+.chart-annotations summary {
+    cursor: pointer;
+    width: fit-content;
+}
+
+.chart-annotations p {
+    margin: .45rem 0;
+}
+
+.chart-annotations ul {
+    display: grid;
+    gap: .3rem;
+    margin: .45rem 0;
+    padding-left: 1.25rem;
 }
 
 .grid-line {
@@ -435,13 +314,20 @@ svg {
     border-radius: .75rem;
     box-shadow: 0 14px 36px rgb(0 0 0 / 38%);
     max-width: min(430px, calc(100% - 1.5rem));
+    max-height: min(430px, 60dvh);
     min-width: 330px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: .8rem;
     pointer-events: auto;
     position: absolute;
     top: .65rem;
     transform: translateX(12px);
     z-index: 3;
+}
+
+.chart-shell[data-hover-dismissed] .hover-card {
+    display: none;
 }
 
 .hover-card.preview {
@@ -674,29 +560,6 @@ code {
 }
 
 @media (max-width: 620px) {
-    .chart-toolbar {
-        align-items: start;
-        flex-direction: column;
-    }
-
-    .chart-toolbar fieldset {
-        flex-wrap: wrap;
-    }
-
-    .chart-toolbar .band-controls {
-        align-items: start;
-        flex-direction: column;
-    }
-
-    .legend {
-        gap: .35rem;
-        padding-inline: .8rem;
-    }
-
-    .legend-item {
-        flex: 1 1 14rem;
-    }
-
     .hover-card,
     .hover-card.flip {
         left: .75rem !important;

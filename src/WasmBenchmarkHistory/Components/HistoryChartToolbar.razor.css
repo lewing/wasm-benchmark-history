@@ -1,0 +1,109 @@
+.chart-toolbar {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: .8rem 1.2rem;
+}
+
+.chart-toolbar fieldset {
+    align-items: center;
+    border: 0;
+    display: flex;
+    gap: .25rem;
+    margin: 0;
+    padding: 0;
+}
+
+.chart-toolbar .band-controls {
+    gap: .5rem;
+}
+
+.band-controls label,
+.annotation-controls label {
+    align-items: center;
+    color: var(--muted);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: .62rem;
+    gap: .35rem;
+}
+
+.band-controls input,
+.annotation-controls input {
+    accent-color: var(--accent);
+}
+
+.band-controls select {
+    background: #0b1527;
+    border: 1px solid var(--line-strong);
+    border-radius: .4rem;
+    color: var(--ink);
+    font: inherit;
+    font-size: .62rem;
+    padding: .3rem .4rem;
+}
+
+.band-controls select:disabled {
+    cursor: not-allowed;
+    opacity: .4;
+}
+
+.chart-toolbar legend {
+    color: var(--muted);
+    float: left;
+    font-size: .62rem;
+    margin-right: .5rem;
+}
+
+.chart-toolbar button {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: .4rem;
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: .62rem;
+    padding: .32rem .5rem;
+}
+
+.chart-toolbar button:hover,
+.chart-toolbar button.active {
+    background: rgb(100 225 255 / 11%);
+    border-color: rgb(100 225 255 / 42%);
+    color: var(--accent);
+}
+
+.chart-toolbar button:disabled {
+    cursor: not-allowed;
+    opacity: .4;
+}
+
+.chart-toolbar .reset-range {
+    margin-left: .3rem;
+}
+
+.zoom-help {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .6rem;
+}
+
+
+@media (max-width: 620px) {
+    .chart-toolbar {
+        align-items: start;
+        flex-direction: column;
+    }
+
+    .chart-toolbar fieldset {
+        flex-wrap: wrap;
+    }
+
+    .chart-toolbar .band-controls {
+        align-items: start;
+        flex-direction: column;
+    }
+}

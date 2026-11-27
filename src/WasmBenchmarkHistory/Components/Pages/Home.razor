@@ -1,7 +1,8 @@
 ﻿@page "/"
-@implements IDisposable
+@implements IAsyncDisposable
 @inject IBenchmarkHistoryOrchestrator HistoryService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Wasm benchmark history</PageTitle>
 
@@ -56,9 +57,17 @@ else
                 <small>@TreeBenchmarkCount.ToString("N0") benchmarks</small>
             </div>
 
-            @if (TreeItems.Count > 0)
-            {
-                <div class="benchmark-tree" role="tree" aria-label="Microbenchmarks grouped by category">
+                <p id="benchmark-selection-help" class="tree-help">
+                    Click to select. Cmd/Ctrl-click or use checkboxes to add; Shift-click selects a range.
+                </p>
+                <div @ref="_treeElement"
+                     class="benchmark-tree"
+                     role="tree"
+                     tabindex="0"
+                     aria-multiselectable="true"
+                     aria-describedby="benchmark-selection-help"
+                     aria-label="Microbenchmarks grouped by category"
+                     data-item-count="@TreeItems.Count">
                     <Virtualize TItem="BenchmarkTreeItem" Items="TreeItems" Context="item" ItemSize="39">
                         @if (item.Entry is null)
                         {
@@ -67,6 +76,10 @@ else
                                 <div class="tree-category filtered"
                                      role="treeitem"
                                      aria-expanded="true"
+                                     aria-level="@(item.Depth + 1)"
+                                     tabindex="-1"
+                                     data-tree-index="@item.Index"
+                                     data-parent-index="@item.ParentIndex"
                                      style="--tree-depth:@item.Depth">
                                     <span class="tree-chevron" aria-hidden="true">⌄</span>
                                     <strong>@item.Label</strong>
@@ -78,7 +91,12 @@ else
                                 <button class="tree-category"
                                         type="button"
                                         role="treeitem"
-                                        aria-expanded="@IsCategoryExpanded(item.Path)"
+                                        aria-expanded="@(IsCategoryExpanded(item.Path) ? "true" : "false")"
+                                        aria-level="@(item.Depth + 1)"
+                                        tabindex="-1"
+                                        data-tree-index="@item.Index"
+                                        data-parent-index="@item.ParentIndex"
+                                        data-expandable="true"
                                         style="--tree-depth:@item.Depth"
                                         @onclick="() => ToggleCategory(item.Path)">
                                     <span class="tree-chevron" aria-hidden="true">
@@ -91,82 +109,85 @@ else
                         }
                         else
                         {
-                            <button class="tree-benchmark @(ReferenceEquals(item.Entry, _selectedBenchmark) ? "selected" : null)"
-                                    type="button"
+                            <div class="tree-benchmark @(_selection.Contains(item.Entry.Benchmark) ? "selected" : null)"
                                     role="treeitem"
-                                    aria-selected="@(ReferenceEquals(item.Entry, _selectedBenchmark))"
+                                    aria-selected="@(_selection.Contains(item.Entry.Benchmark) ? "true" : "false")"
+                                    aria-level="@(item.Depth + 1)"
+                                    aria-label="@item.Entry.Benchmark"
+                                    tabindex="-1"
+                                    data-tree-index="@item.Index"
+                                    data-parent-index="@item.ParentIndex"
                                     title="@item.Entry.Benchmark"
                                     style="--tree-depth:@item.Depth"
-                                    @onclick="() => SelectBenchmark(item.Entry)">
+                                    @onclick="args => SelectBenchmarkAsync(item.Entry, args)">
+                                <input type="checkbox"
+                                       tabindex="-1"
+                                       checked="@_selection.Contains(item.Entry.Benchmark)"
+                                       aria-label="@($"Select {item.Entry.Benchmark}")"
+                                       @onclick:stopPropagation="true"
+                                       @onclick="args => SelectBenchmarkAsync(item.Entry, args, toggle: true)" />
                                 <span class="result-name">@GetBenchmarkLabel(item)</span>
                                 <span class="availability @(item.Entry.IsShared ? "shared" : "partial")">
                                     @($"{item.Entry.AvailableRunCount}/{item.Entry.ExpectedRunCount}")
                                 </span>
-                            </button>
+                            </div>
                         }
                     </Virtualize>
+                    @if (TreeItems.Count == 0)
+                    {
+                        <p class="empty-search">No benchmark in the loaded indexes matches this search.</p>
+                    }
                 </div>
-            }
-            else if (HasTreeFilter && _selectedBenchmark is null)
-            {
-                <p class="empty-search">No benchmark in the loaded indexes matches this search.</p>
-            }
         </div>
 
         <div class="run-area">
-            <label>2. Choose 2–@KnownRunConfigurations.All.Count run configurations</label>
-            <div class="run-options">
-                @foreach (var run in KnownRunConfigurations.All)
-                {
-                    var available = _selectedBenchmark?.IsAvailable(run.Id) ?? false;
-                    <label class="run-option @(available ? null : "unavailable")">
-                        <input type="checkbox"
-                               checked="@_selectedRunIds.Contains(run.Id)"
-                               disabled="@(!available)"
-                               @onchange="() => ToggleRun(run.Id)" />
-                        <span class="series-swatch" style="background:@run.Color"></span>
-                        <span>
-                            <strong>@run.DisplayName</strong>
-                            <small>@(available ? run.Description
-                                : _catalog?.ActiveRuns.Contains(run) == false ? "No published results yet"
-                                : "Not available for this benchmark")</small>
-                        </span>
-                    </label>
-                }
-            </div>
+            <span class="step-label" id="run-step-label">2. Choose 2–@KnownRunConfigurations.All.Count run configurations</span>
+            <p class="run-hint">Click a run to cycle off → shown → focused. Focused runs stay bright; other shown runs fade.</p>
+            <RunVisibilityToggles State="_runVisibility"
+                                  IsAvailable="IsRunAvailable"
+                                  Describe="DescribeRun"
+                                  OnCycle="CycleRunAsync"
+                                  OnClearFocus="ClearRunFocus" />
         </div>
 
         <div class="load-area">
-            @if (_selectedBenchmark is not null)
+            @if (_selection.Selected.Count > 0)
             {
                 <div class="selected-benchmark">
-                    <span>Selected</span>
-                    <strong>@_selectedBenchmark.Benchmark</strong>
-                    <small class="@(_selectedBenchmark.IsShared ? "shared-text" : "partial-text")">
-                        @_selectedBenchmark.Availability
-                    </small>
+                    <span>@_selection.Selected.Count selected · stacked graphs</span>
+                    <ul class="selected-benchmarks">
+                        @foreach (var benchmark in _selection.Selected)
+                        {
+                            <li @key="benchmark">
+                                <button type="button"
+                                        class="selection-name"
+                                        aria-pressed="@(benchmark == _selection.ActiveBenchmark ? "true" : "false")"
+                                        @onclick="() => ActivateBenchmark(benchmark)">@benchmark</button>
+                                <button type="button"
+                                        class="remove-benchmark"
+                                        aria-label="@($"Remove {benchmark}")"
+                                        @onclick="() => RemoveBenchmarkAsync(benchmark)">×</button>
+                            </li>
+                        }
+                    </ul>
                 </div>
             }
             else
             {
-                <p>Select a search result to configure the comparison.</p>
+                <p>Select a benchmark to compare its available run configurations.</p>
             }
 
-            <button class="primary-button"
-                    type="button"
-                    disabled="@(!CanLoad)"
-                    @onclick="LoadHistoriesFromUiAsync">
+            <div class="history-load-status" role="status" aria-live="polite">
                 @if (_isLoadingHistories)
                 {
-                    <span class="button-spinner"></span>
+                    <span class="history-spinner" aria-hidden="true"></span>
                     <span>Loading histories…</span>
                 }
-                else
+                else if (_selection.Selected.Count > 0 && _selectedRunIds.Count < 2)
                 {
-                    <span>Compare histories</span>
-                    <span aria-hidden="true">→</span>
+                    <span>Select at least two run configurations to compare.</span>
                 }
-            </button>
+            </div>
         </div>
     </section>
 }
@@ -187,23 +208,110 @@ else
     </div>
 }
 
+@if (_selection.Selected.Count > 0 && _selectedRunIds.Count >= 2)
+{
+    var compact = _selection.Selected.Count > 1;
+    var lastBenchmark = _selection.Selected[^1];
+    <div class="stack-toolbar">
+        <HistoryChartToolbar TimeRange="_timeRange"
+                             TimeRangeChanged="OnTimeRangeChanged"
+                             ShowVariabilityBand="_showVariabilityBand"
+                             ShowVariabilityBandChanged="OnVariabilityBandChanged"
+                             VariabilityWindow="_variabilityWindow"
+                             VariabilityWindowChanged="OnVariabilityWindowChanged"
+                             ShowPerformanceRevisionMarkers="_showPerformanceRevisionMarkers"
+                             ShowPerformanceRevisionMarkersChanged="OnPerformanceRevisionMarkersChanged" />
+        <div class="stack-legend">
+            <RunVisibilityToggles State="_runVisibility"
+                                  IsAvailable="IsRunAvailable"
+                                  Legend="true"
+                                  Label="Chart runs: click to cycle off, shown, focused"
+                                  OnCycle="CycleRunAsync"
+                                  OnClearFocus="ClearRunFocus" />
+            <label class="mode-toggle">
+                <input type="checkbox"
+                       checked="@_normalized"
+                       @onchange="OnNormalizedChanged" />
+                <span>Normalize to first available run</span>
+            </label>
+        </div>
+        @if (compact)
+        {
+            <p>Shared time axis, zoom and crosshair · independent value scales · select a row for investigation details.</p>
+        }
+    </div>
+    <section class="chart-stack @(compact ? "compact" : null)" aria-label="Selected benchmark histories">
+        @foreach (var benchmark in _selection.Selected)
+        {
+            var active = benchmark == _selection.ActiveBenchmark;
+            <article @key="benchmark" class="benchmark-chart @(active ? "active-benchmark" : null)">
+                <header class="results-heading @(compact ? "row-heading" : null)">
+                    <div>
+                        <h2 title="@benchmark">@benchmark</h2>
+                        @if (_benchmarkResults.TryGetValue(benchmark, out var summary) && summary.Error is null)
+                        {
+                            <p>@summary.Histories.Sum(history => history.Observations.Count).ToString("N0") observations across @summary.Histories.Count run configurations</p>
+                        }
+                    </div>
+                    <button class="activate-benchmark"
+                            type="button"
+                            aria-pressed="@(active ? "true" : "false")"
+                            @onclick="() => ActivateBenchmark(benchmark)">
+                        @(active ? "Active details" : "Show details")
+                    </button>
+                </header>
+                @if (_benchmarkResults.TryGetValue(benchmark, out var result))
+                {
+                    @if (result.Error is not null)
+                    {
+                        <div class="error-banner" role="alert">
+                            <span>@result.Error</span>
+                            <button type="button" class="activate-benchmark" @onclick="() => RetryBenchmarkAsync(benchmark)">Retry</button>
+                        </div>
+                    }
+                    else
+                    {
+                        var missingRuns = KnownRunConfigurations.All
+                            .Where(run => _selectedRunIds.Contains(run.Id) && !_catalog!.Find(benchmark)!.IsAvailable(run.Id))
+                            .Select(run => run.DisplayName).ToArray();
+                        @if (missingRuns.Length > 0)
+                        {
+                            <p class="history-note">No data for selected runs: @string.Join(", ", missingRuns).</p>
+                        }
+                        @if (result.Histories.SelectMany(history => history.DataConflicts ?? []).Any())
+                        {
+                            <div class="error-banner" role="alert">Published/direct overlap conflict: @string.Join(' ', result.Histories.SelectMany(history => history.DataConflicts ?? []).Distinct(StringComparer.Ordinal))</div>
+                        }
+                        <HistoryChart Histories="result.Histories"
+                                      Matches="result.Matches"
+                                      Normalized="_normalized"
+                                      TimelineBounds="_timelineBounds"
+                                      TimeRange="_timeRange"
+                                      TimeRangeChanged="OnTimeRangeChanged"
+                                      ShowVariabilityBand="_showVariabilityBand"
+                                      ShowPerformanceRevisionMarkers="_showPerformanceRevisionMarkers"
+                                      VariabilityWindow="_variabilityWindow"
+                                      FocusedRunIds="_runVisibility.FocusedRunIds"
+                                      Compact="compact"
+                                      ShowTimeAxis="@(!compact || benchmark == lastBenchmark)"
+                                      BaselinePin="_investigation.BaselinePin"
+                                      ComparisonPin="_investigation.ComparisonPin"
+                                      PinRequested="request => OnBenchmarkPinRequested(benchmark, request)" />
+                    }
+                }
+                else
+                {
+                    <p class="history-note" role="status">Loading histories for @benchmark…</p>
+                }
+            </article>
+        }
+    </section>
+}
+
 @if (_histories.Count > 0)
 {
-    <section class="results-heading">
-        <div>
-            <p class="eyebrow">PRIMARY TRACE HISTORY</p>
-            <h2>@_histories[0].Benchmark</h2>
-            <p>
-                @_histories.Sum(history => history.Observations.Count).ToString("N0") observations
-                across @_histories.Count run configurations
-            </p>
-        </div>
-        <label class="mode-toggle">
-            <input type="checkbox"
-                   checked="@_normalized"
-                   @onchange="OnNormalizedChanged" />
-            <span>Normalize to @_histories[0].Run.DisplayName</span>
-        </label>
+    <section class="active-details-heading" aria-label="Active benchmark">
+        <h2>Investigation: @_selection.ActiveBenchmark</h2>
     </section>
 
     @if (DirectObservationCount > 0)
@@ -217,29 +325,21 @@ else
         </div>
     }
 
-    @if (DataConflicts.Length > 0)
+    @if (_selection.Selected.Count > 1 && _showVariabilityBand && ActiveResult is { Error: null })
     {
-        <div class="error-banner" role="alert">
-            <strong>Published/direct overlap conflict.</strong>
-            <span>@string.Join(' ', DataConflicts)</span>
-        </div>
+        <VariabilityAnalysisPanels Histories="_histories"
+                                   Matches="_matches"
+                                   Normalized="_normalized"
+                                   TimeRange="_timeRange"
+                                   TimelineBounds="_timelineBounds"
+                                   Window="_variabilityWindow"
+                                   PinnedTimestamp="@(_investigation.ComparisonPin?.Identity.Timestamp ?? _investigation.BaselinePin?.Identity.Timestamp)"
+                                   FocusedRunIds="_runVisibility.FocusedRunIds" />
     }
 
-    <HistoryChart Histories="_histories"
-                  Matches="_matches"
-                  Normalized="_normalized"
-                  TimeRange="_timeRange"
-                  TimeRangeChanged="OnTimeRangeChanged"
-                  ShowVariabilityBand="_showVariabilityBand"
-                  ShowVariabilityBandChanged="OnVariabilityBandChanged"
-                  VariabilityWindow="_variabilityWindow"
-                  VariabilityWindowChanged="OnVariabilityWindowChanged"
-                  BaselinePin="_investigation.BaselinePin"
-                  ComparisonPin="_investigation.ComparisonPin"
-                  PinRequested="OnPinRequested" />
-
-    <RegressionInvestigationPanel Histories="_histories"
-                                  InvestigationRunId="@_investigation.RunId"
+    <RegressionInvestigationPanel Histories="_selectedHistories"
+                                  Benchmarks="_selection.Selected"
+                                  RunIds="@_selectedRunIds"
                                   BaselinePin="_investigation.BaselinePin"
                                   ComparisonPin="_investigation.ComparisonPin"
                                   UseRobustSummary="_useRobustSummary"
@@ -339,22 +439,40 @@ else
     private const int DisplayLimit = 250;
 
     private BenchmarkCatalog? _catalog;
-    private BenchmarkCatalogEntry? _selectedBenchmark;
+    private readonly BenchmarkSelectionState _selection = new();
+    private readonly Dictionary<string, BenchmarkResult> _benchmarkResults = new(StringComparer.Ordinal);
+    private BenchmarkResult? ActiveResult =>
+        _selection.ActiveBenchmark is not null
+        && _benchmarkResults.TryGetValue(_selection.ActiveBenchmark, out var result) ? result : null;
     private string _searchText = string.Empty;
-    private readonly HashSet<string> _selectedRunIds = new(StringComparer.Ordinal);
-    private IReadOnlyList<BenchmarkHistory> _histories = [];
-    private IReadOnlyList<MatchedComparison> _matches = [];
+    private readonly RunVisibilityState _runVisibility = new();
+    private IReadOnlySet<string> _selectedRunIds => _runVisibility.ShownRunIds;
+    private IReadOnlyList<BenchmarkHistory> _histories => ActiveResult?.Histories ?? [];
+    private IReadOnlyList<BenchmarkHistory> _selectedHistories => _selection.Selected
+        .Where(_benchmarkResults.ContainsKey)
+        .SelectMany(benchmark => _benchmarkResults[benchmark].Histories)
+        .ToArray();
+    private IReadOnlyList<MatchedComparison> _matches => ActiveResult?.Matches ?? [];
     private string? _errorMessage;
     private bool _isLoadingHistories;
     private bool _normalized;
     private HistoryTimeRange _timeRange = HistoryTimeRange.All;
     private bool _showVariabilityBand;
+    private bool _showPerformanceRevisionMarkers;
     private int _variabilityWindow = RollingVariabilityCalculator.DefaultWindow;
     private readonly InvestigationWorkflowState _investigation = new();
     private bool _useRobustSummary;
     private string? _stateMessage;
     private long _loadVersion;
     private CancellationTokenSource? _loadCancellation;
+    private readonly SemaphoreSlim _historyConcurrency = new(3);
+    private int _pendingHistoryLoads;
+    private bool _disposed;
+    private (DateTime Start, DateTime End)? _timelineBounds;
+    private ElementReference _treeElement;
+    private IJSObjectReference? _treeModule;
+    private IJSObjectReference? _treeHandle;
+    private List<BenchmarkTreeItem>? _treeItems;
     private readonly HashSet<string> _expandedCategories = new(StringComparer.OrdinalIgnoreCase);
     private int _catalogTotal;
     private int _sharedTotal;
@@ -365,10 +483,15 @@ else
 
     private bool HasTreeFilter => !string.IsNullOrWhiteSpace(_searchText);
 
-    private ICollection<BenchmarkTreeItem> TreeItems
+    private List<BenchmarkTreeItem> TreeItems
     {
         get
         {
+            if (_treeItems is not null)
+            {
+                return _treeItems;
+            }
+
             if (_catalog is null)
             {
                 return [];
@@ -381,7 +504,22 @@ else
                 AppendTreeItems(node, items, filter, ancestorMatches: false, depth: 0);
             }
 
-            return items;
+            var parents = new Stack<BenchmarkTreeItem>();
+            for (var index = 0; index < items.Count; index++)
+            {
+                var item = items[index];
+                item.Index = index;
+                while (parents.TryPeek(out var parent) && parent.Depth >= item.Depth)
+                {
+                    parents.Pop();
+                }
+                item.ParentIndex = parents.TryPeek(out var ancestor) ? ancestor.Index : -1;
+                if (item.Entry is null)
+                {
+                    parents.Push(item);
+                }
+            }
+            return _treeItems = items;
         }
     }
 
@@ -391,10 +529,14 @@ else
             : TreeItems.Count(item => item.Entry is not null);
 
     private bool CanLoad =>
-        _selectedBenchmark is not null
+        _selection.Selected.Count > 0
         && _selectedRunIds.Count >= 2
-        && _selectedRunIds.Count <= KnownRunConfigurations.All.Count
-        && !_isLoadingHistories;
+        && _selectedRunIds.Count <= KnownRunConfigurations.All.Count;
+
+    private bool IsRunAvailable(string runId) =>
+        _selection.Selected.Count == 0
+            ? _catalog?.ActiveRuns.Any(run => run.Id == runId) == true
+            : _selection.Selected.Any(benchmark => _catalog!.Find(benchmark)!.IsAvailable(runId));
 
     private int DirectObservationCount => _histories.Sum(history =>
         history.Observations.Count(observation => observation.Source == ObservationSource.DirectSnapshot));
@@ -410,9 +552,6 @@ else
                 : $"{timestamps.Min():yyyy-MM-dd} through {timestamps.Max():yyyy-MM-dd}";
         }
     }
-    private string[] DataConflicts => _histories.SelectMany(history => history.DataConflicts ?? [])
-        .Distinct(StringComparer.Ordinal).ToArray();
-
     private IReadOnlyList<MatchedComparison> DisplayedMatches =>
         _matches.TakeLast(DisplayLimit).Reverse().ToArray();
 
@@ -433,6 +572,7 @@ else
                 run => run.Id,
                 run => _catalog.Entries.Count(entry => entry.IsAvailable(run.Id)),
                 StringComparer.Ordinal);
+            _runVisibility.Reset(_catalog.ActiveRuns.Select(run => run.Id));
             await RestoreSharedStateAsync(sharedState.State);
         }
         catch (BenchmarkDataException exception)
@@ -444,59 +584,81 @@ else
     private void OnSearchInput(ChangeEventArgs eventArgs)
     {
         _searchText = eventArgs.Value?.ToString() ?? string.Empty;
-        if (_selectedBenchmark is not null
-            && !string.Equals(_searchText, _selectedBenchmark.Benchmark, StringComparison.Ordinal))
+        _treeItems = null;
+    }
+
+    private async Task SelectBenchmarkAsync(
+        BenchmarkCatalogEntry entry, MouseEventArgs args, bool toggle = false)
+    {
+        var previousActive = _selection.ActiveBenchmark;
+        _selection.Select(
+            entry.Benchmark,
+            TreeItems.Where(item => item.Entry is not null).Select(item => item.Entry!.Benchmark).ToArray(),
+            toggle || args.CtrlKey || args.MetaKey,
+            args.ShiftKey);
+        if (previousActive != _selection.ActiveBenchmark)
         {
-            InvalidateCurrentLoad();
-            _selectedBenchmark = null;
-            _selectedRunIds.Clear();
-            _histories = [];
-            _matches = [];
             ClearInvestigationState();
+        }
+
+        _errorMessage = null;
+        UpdateUrl();
+        await LoadHistoriesAsync(updateUrl: true);
+    }
+
+    private async Task RemoveBenchmarkAsync(string benchmark)
+    {
+        var previousActive = _selection.ActiveBenchmark;
+        _selection.Select(benchmark, [], toggle: true);
+        if (previousActive is not null && _selection.Contains(previousActive))
+        {
+            _selection.Activate(previousActive);
+        }
+        else
+        {
+            ClearInvestigationState();
+        }
+        UpdateUrl();
+        await LoadHistoriesAsync(updateUrl: true);
+    }
+
+    private void ActivateBenchmark(string benchmark)
+    {
+        if (_selection.ActiveBenchmark != benchmark)
+        {
+            ClearInvestigationState();
+            _selection.Activate(benchmark);
             UpdateUrl();
         }
     }
 
-    private void SelectBenchmark(BenchmarkCatalogEntry entry)
+    private async Task RetryBenchmarkAsync(string benchmark)
     {
-        InvalidateCurrentLoad();
-        _selectedBenchmark = entry;
-        _searchText = entry.Benchmark;
-        _selectedRunIds.Clear();
-        foreach (var run in KnownRunConfigurations.All.Where(run => entry.IsAvailable(run.Id)))
-        {
-            _selectedRunIds.Add(run.Id);
-        }
-
-        _histories = [];
-        _matches = [];
-        _errorMessage = null;
-        _normalized = false;
-        _timeRange = HistoryTimeRange.All;
-        ClearInvestigationState();
-        UpdateUrl();
+        _benchmarkResults.Remove(benchmark);
+        await LoadHistoriesAsync(updateUrl: true);
     }
 
-    private void ToggleRun(string runId)
+    private async Task CycleRunAsync(string runId)
     {
-        InvalidateCurrentLoad();
-        if (!_selectedRunIds.Remove(runId))
+        if (_runVisibility.Cycle(runId) == RunVisibility.Focused)
         {
-            _selectedRunIds.Add(runId);
+            // Focus only changes emphasis; the loaded histories remain valid.
+            UpdateUrl();
+            return;
         }
 
-        _histories = [];
-        _matches = [];
-        if (_investigation.RunId is not null && !_selectedRunIds.Contains(_investigation.RunId))
-        {
-            ClearInvestigationState();
-        }
+        _benchmarkResults.Clear();
+        _timelineBounds = null;
+        _errorMessage = null;
+        ClearInvestigationState();
 
         UpdateUrl();
+        await LoadHistoriesAsync(updateUrl: true);
     }
 
     private void ToggleCategory(string category)
     {
+        _treeItems = null;
         if (!_expandedCategories.Remove(category))
         {
             _expandedCategories.Add(category);
@@ -570,49 +732,77 @@ else
     private static int CountBenchmarks(IEnumerable<BenchmarkTreeItem> items) =>
         items.Count(item => item.Entry is not null);
 
-    private Task LoadHistoriesFromUiAsync() =>
-        LoadHistoriesAsync(preserveViewState: false, updateUrl: true);
-
-    private async Task LoadHistoriesAsync(bool preserveViewState, bool updateUrl)
+    private async Task LoadHistoriesAsync(bool updateUrl)
     {
-        if (_catalog is null || _selectedBenchmark is null || !CanLoad)
+        InvalidateCurrentLoad();
+        foreach (var benchmark in _benchmarkResults.Keys.Where(name => !_selection.Contains(name)).ToArray())
+        {
+            _benchmarkResults.Remove(benchmark);
+        }
+        UpdateTimelineBounds();
+        var catalog = _catalog;
+        if (catalog is null || !CanLoad)
         {
             return;
         }
 
-        InvalidateCurrentLoad();
         var loadVersion = _loadVersion;
         var loadCancellation = new CancellationTokenSource();
+        var loadToken = loadCancellation.Token;
         _loadCancellation = loadCancellation;
+        _pendingHistoryLoads++;
         _isLoadingHistories = true;
         _errorMessage = null;
-        _histories = [];
-        _matches = [];
-        if (!preserveViewState)
-        {
-            _normalized = false;
-            _timeRange = HistoryTimeRange.All;
-            ClearInvestigationState();
-        }
-
         try
         {
             var orderedRunIds = KnownRunConfigurations.All
                 .Where(run => _selectedRunIds.Contains(run.Id))
                 .Select(run => run.Id)
                 .ToArray();
-            var histories = await HistoryService.LoadHistoriesAsync(
-                _catalog,
-                _selectedBenchmark.Benchmark,
-                orderedRunIds,
-                loadCancellation.Token);
+            var pending = _selection.Selected.Where(name => !_benchmarkResults.ContainsKey(name)).ToArray();
+            await Task.WhenAll(pending.Select(async benchmark =>
+            {
+                await _historyConcurrency.WaitAsync(loadToken);
+                try
+                {
+                    loadToken.ThrowIfCancellationRequested();
+                    BenchmarkResult result;
+                    var runIds = orderedRunIds.Where(id => catalog.Find(benchmark)!.IsAvailable(id)).ToArray();
+                    if (runIds.Length == 0)
+                    {
+                        result = new([], [], "This benchmark has no data for the selected run configurations.");
+                    }
+                    else
+                    {
+                        var histories = await HistoryService.LoadHistoriesAsync(
+                            catalog, benchmark, runIds, loadToken);
+                        result = new(histories, ObservationMatcher.MatchStrict(histories), null);
+                    }
+                    if (loadVersion == _loadVersion)
+                    {
+                        _benchmarkResults[benchmark] = result;
+                        UpdateTimelineBounds();
+                        StateHasChanged();
+                    }
+                }
+                catch (BenchmarkDataException exception)
+                {
+                    if (loadVersion == _loadVersion)
+                    {
+                        _benchmarkResults[benchmark] = new([], [], exception.Message);
+                        StateHasChanged();
+                    }
+                }
+                finally
+                {
+                    _historyConcurrency.Release();
+                }
+            }));
             if (loadVersion != _loadVersion)
             {
                 return;
             }
 
-            _histories = histories;
-            _matches = ObservationMatcher.MatchStrict(histories);
             NormalizeCustomTimeRange();
             if (updateUrl)
             {
@@ -631,6 +821,11 @@ else
         }
         finally
         {
+            _pendingHistoryLoads--;
+            if (_disposed && _pendingHistoryLoads == 0)
+            {
+                _historyConcurrency.Dispose();
+            }
             if (ReferenceEquals(_loadCancellation, loadCancellation))
             {
                 _loadCancellation = null;
@@ -640,18 +835,28 @@ else
         }
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    private void UpdateTimelineBounds()
     {
-        if (!firstRender)
-        {
-            return;
-        }
+        var timestamps = _benchmarkResults.Values.SelectMany(result => result.Histories)
+            .SelectMany(history => history.Observations).Select(observation => observation.Timestamp).ToArray();
+        _timelineBounds = timestamps.Length == 0 ? null : (timestamps.Min(), timestamps.Max());
+    }
 
-        _isInteractive = true;
-        if (_pendingCanonicalUri is not null)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
         {
-            NavigateToCanonicalUri(_pendingCanonicalUri);
-            _pendingCanonicalUri = null;
+            _isInteractive = true;
+            if (_pendingCanonicalUri is not null)
+            {
+                NavigateToCanonicalUri(_pendingCanonicalUri);
+                _pendingCanonicalUri = null;
+            }
+        }
+        if (_catalog is not null && _treeModule is null)
+        {
+            _treeModule = await JS.InvokeAsync<IJSObjectReference>("import", "./benchmark-tree.js");
+            _treeHandle = await _treeModule.InvokeAsync<IJSObjectReference>("initializeTree", _treeElement);
         }
     }
 
@@ -662,44 +867,49 @@ else
                 return;
             }
 
-            if (state.Benchmark is null)
+            var requestedBenchmarks = state.SelectedBenchmarks
+                ?? (state.Benchmark is null ? [] : new[] { state.Benchmark });
+            if (requestedBenchmarks.Count == 0)
             {
                 UpdateUrl();
                 return;
             }
 
-            var entry = _catalog.Find(state.Benchmark);
-            if (entry is null)
+            var selected = new List<string>();
+            foreach (var benchmark in requestedBenchmarks)
             {
-                AddStateMessage($"Benchmark '{state.Benchmark}' is not in the current catalog.");
-                UpdateUrl();
-                return;
+                if (_catalog.Find(benchmark) is null)
+                {
+                    AddStateMessage($"Benchmark '{benchmark}' is not in the current catalog.");
+                }
+                else
+                {
+                    selected.Add(benchmark);
+                }
             }
 
-            _selectedBenchmark = entry;
-            _searchText = entry.Benchmark;
-            _selectedRunIds.Clear();
+            _selection.Restore(selected, state.Benchmark);
+            ExpandSelectedCategories(_catalog.CategoryTree);
+            _treeItems = null;
             var requestedRuns = state.RunIds.Count > 0
                 ? KnownRunConfigurations.All.Where(run => state.RunIds.Contains(run.Id))
-                : KnownRunConfigurations.All.Where(run => entry.IsAvailable(run.Id));
-            foreach (var run in requestedRuns.Where(run => entry.IsAvailable(run.Id)))
-            {
-                _selectedRunIds.Add(run.Id);
-            }
+                : _catalog.ActiveRuns;
+            _runVisibility.Reset(
+                requestedRuns.Where(run => IsRunAvailable(run.Id)).Select(run => run.Id),
+                state.FocusedRunIds);
 
             if (_selectedRunIds.Count < 2)
             {
                 AddStateMessage("The shared run selection is not available for this benchmark.");
-                _selectedRunIds.Clear();
-                foreach (var run in KnownRunConfigurations.All.Where(run => entry.IsAvailable(run.Id)))
-                {
-                    _selectedRunIds.Add(run.Id);
-                }
+                _runVisibility.Reset(
+                    KnownRunConfigurations.All.Where(run => IsRunAvailable(run.Id)).Select(run => run.Id),
+                    state.FocusedRunIds);
             }
 
             if (_selectedRunIds.Count < 2)
             {
-                AddStateMessage("This benchmark does not have enough available runs to restore a comparison.");
+                AddStateMessage("The selected benchmarks do not have enough available runs to restore a comparison.");
+                UpdateUrl();
                 return;
             }
 
@@ -708,31 +918,36 @@ else
             _showVariabilityBand = state.ShowVariabilityBand;
             _variabilityWindow = state.VariabilityWindow;
             _useRobustSummary = state.UseRobustSummary;
-            var investigationRunId = state.InvestigationRunId;
-            if (investigationRunId is not null && !_selectedRunIds.Contains(investigationRunId))
-            {
-                AddStateMessage("The investigation run was not selected and was ignored.");
-                investigationRunId = null;
-            }
-
-            await LoadHistoriesAsync(preserveViewState: true, updateUrl: false);
-            if (_histories.Count == 0 || investigationRunId is null)
-            {
-                _investigation.Clear();
-                UpdateUrl();
-                return;
-            }
-
-            var history = _histories.First(history => history.Run.Id == investigationRunId);
+            await LoadHistoriesAsync(updateUrl: false);
             _investigation.Restore(
-                investigationRunId,
-                RestorePin(history, state.BaselineA, "baseline A"),
-                RestorePin(history, state.ComparisonB, "comparison B"));
+                RestorePin(
+                    state.BaselineRunId ?? state.InvestigationRunId,
+                    state.BaselineA,
+                    "baseline A"),
+                RestorePin(
+                    state.ComparisonRunId ?? state.InvestigationRunId,
+                    state.ComparisonB,
+                    "comparison B"));
             UpdateUrl();
         }
 
+        private bool ExpandSelectedCategories(IEnumerable<BenchmarkCatalogNode> nodes)
+        {
+            var anySelected = false;
+            foreach (var node in nodes)
+            {
+                var descendantSelected = ExpandSelectedCategories(node.Children);
+                if (descendantSelected || node.Entries.Any(entry => _selection.Contains(entry.Benchmark)))
+                {
+                    _expandedCategories.Add(node.Path);
+                    anySelected = true;
+                }
+            }
+            return anySelected;
+        }
+
         private InvestigationPin? RestorePin(
-            BenchmarkHistory history,
+            string? runId,
             ObservationIdentity? identity,
             string label)
         {
@@ -741,14 +956,14 @@ else
                 return null;
             }
 
-            var pin = new InvestigationPin(history.Run.Id, identity.Value);
-            if (RegressionInvestigation.Resolve(history, pin) is not null)
+            if (runId is null
+                || !KnownRunConfigurations.All.Any(run => run.Id == runId))
             {
-                return pin;
+                AddStateMessage($"The shared {label} pin has no valid source runtime and was ignored.");
+                return null;
             }
 
-            AddStateMessage($"The shared {label} pin is missing or ambiguous and was ignored.");
-            return null;
+            return new InvestigationPin(runId, identity.Value);
         }
 
         private void OnNormalizedChanged(ChangeEventArgs eventArgs)
@@ -756,6 +971,20 @@ else
             _normalized = eventArgs.Value is true;
             UpdateUrl();
         }
+
+        private void OnPerformanceRevisionMarkersChanged(bool enabled) =>
+            _showPerformanceRevisionMarkers = enabled;
+
+        private void ClearRunFocus()
+        {
+            _runVisibility.ClearFocus();
+            UpdateUrl();
+        }
+
+        private string DescribeRun(RunConfiguration run) =>
+            IsRunAvailable(run.Id) ? run.Description
+                : _catalog?.ActiveRuns.Contains(run) == false ? "No published results yet"
+                : "Not available for the selected benchmarks";
 
         private void OnTimeRangeChanged(HistoryTimeRange range)
         {
@@ -780,8 +1009,9 @@ else
             UpdateUrl();
         }
 
-        private void OnPinRequested(InvestigationPinRequest request)
+        private void OnBenchmarkPinRequested(string benchmark, InvestigationPinRequest request)
         {
+            ActivateBenchmark(benchmark);
             _investigation.Set(request);
             UpdateUrl();
         }
@@ -817,15 +1047,15 @@ else
 
         private void UpdateUrl()
         {
-            var target = "/";
-            if (_selectedBenchmark is not null)
+            var target = string.Empty;
+            if (_selection.ActiveBenchmark is not null)
             {
                 var runIds = KnownRunConfigurations.All
                     .Where(run => _selectedRunIds.Contains(run.Id))
                     .Select(run => run.Id)
                     .ToArray();
                 var state = new HistoryPageState(
-                    _selectedBenchmark.Benchmark,
+                    _selection.ActiveBenchmark,
                     runIds,
                     _normalized,
                     _timeRange,
@@ -834,8 +1064,15 @@ else
                     _investigation.ComparisonPin?.Identity,
                     _useRobustSummary,
                     _showVariabilityBand,
-                    _variabilityWindow);
-                target = HistoryPageStateCodec.ToRelativeUri(state);
+                    _variabilityWindow,
+                    _selection.Selected,
+                    KnownRunConfigurations.All
+                        .Where(run => _runVisibility.FocusedRunIds.Contains(run.Id))
+                        .Select(run => run.Id)
+                        .ToArray(),
+                    _investigation.BaselinePin?.RunId,
+                    _investigation.ComparisonPin?.RunId);
+                target = HistoryPageStateCodec.ToRelativeUri(state).TrimStart('/');
             }
 
             if (!_isInteractive)
@@ -858,24 +1095,12 @@ else
 
         private void NormalizeCustomTimeRange()
         {
-            if (_timeRange.Kind != HistoryRangeKind.Custom || _histories.Count == 0)
+            if (_timeRange.Kind != HistoryRangeKind.Custom || _timelineBounds is null)
             {
                 return;
             }
 
-            var timestamps = _histories
-                .SelectMany(history => history.Observations)
-                .Select(observation => observation.Timestamp)
-                .ToArray();
-            if (timestamps.Length == 0)
-            {
-                _timeRange = HistoryTimeRange.All;
-                AddStateMessage("The shared custom range was ignored because this history has no observations.");
-                return;
-            }
-
-            var minimum = timestamps.Min();
-            var maximum = timestamps.Max();
+            var (minimum, maximum) = _timelineBounds.Value;
             var resolved = _timeRange.Resolve(minimum, maximum);
             if (resolved.Start == _timeRange.Start && resolved.End == _timeRange.End)
             {
@@ -897,7 +1122,30 @@ else
         _isLoadingHistories = false;
     }
 
-    public void Dispose() => InvalidateCurrentLoad();
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        InvalidateCurrentLoad();
+        if (_pendingHistoryLoads == 0)
+        {
+            _historyConcurrency.Dispose();
+        }
+        try
+        {
+            if (_treeHandle is not null)
+            {
+                await _treeHandle.InvokeVoidAsync("dispose");
+                await _treeHandle.DisposeAsync();
+            }
+            if (_treeModule is not null)
+            {
+                await _treeModule.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
 
     private static string ShortSha(string sha) =>
         sha.Length <= 8 ? sha : sha[..8];
@@ -931,7 +1179,7 @@ else
             Label = node.Name;
             Path = node.Path;
             Entry = entry;
-            Depth = depth;
+            Depth = depth + 1;
         }
 
         public string Label { get; }
@@ -943,5 +1191,14 @@ else
         public int Count { get; }
 
         public int Depth { get; }
+
+        public int Index { get; set; }
+
+        public int ParentIndex { get; set; }
     }
+
+    private sealed record BenchmarkResult(
+        IReadOnlyList<BenchmarkHistory> Histories,
+        IReadOnlyList<MatchedComparison> Matches,
+        string? Error);
 }

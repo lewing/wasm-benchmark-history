@@ -1,0 +1,189 @@
+.run-toggles.list {
+    display: grid;
+    gap: .5rem;
+}
+
+.run-toggles.legend {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+}
+
+.run-toggle {
+    align-items: center;
+    background: rgb(4 12 25 / 45%);
+    border: 1px solid var(--line);
+    border-radius: .7rem;
+    color: inherit;
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    gap: .65rem;
+    grid-template-columns: 1.8rem 1fr auto;
+    padding: .7rem .8rem;
+    text-align: left;
+    transition: background-color 120ms ease-out, border-color 120ms ease-out, opacity 120ms ease-out;
+}
+
+.legend .run-toggle {
+    border-radius: .5rem;
+    gap: .45rem;
+    padding: .3rem .5rem;
+}
+
+.run-toggle:hover:not(:disabled) {
+    border-color: var(--line-strong);
+}
+
+.run-toggle:focus-visible,
+.clear-focus:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.run-toggle:disabled {
+    cursor: not-allowed;
+    opacity: .45;
+}
+
+.run-toggle.is-shown,
+.run-toggle.is-focused {
+    background: rgb(255 255 255 / 4%);
+    border-color: var(--line-strong);
+}
+
+.run-toggle.is-focused {
+    border-color: var(--series-color);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--series-color) 45%, transparent);
+}
+
+.run-toggle.is-hidden .run-copy {
+    color: var(--muted);
+}
+
+.legend .run-toggle.is-hidden {
+    background: transparent;
+    border-style: dashed;
+}
+
+.run-toggle.is-dimmed {
+    opacity: .5;
+}
+
+.run-mark {
+    display: block;
+    height: 1rem;
+    position: relative;
+}
+
+.run-mark::before {
+    border-top: 2px solid var(--series-color);
+    content: "";
+    left: 0;
+    position: absolute;
+    right: 0;
+    top: calc(50% - 1px);
+}
+
+.run-mark i {
+    background: var(--series-color);
+    border-radius: 50%;
+    height: .5rem;
+    left: calc(50% - .25rem);
+    position: absolute;
+    top: calc(50% - .25rem);
+    width: .5rem;
+}
+
+.is-hidden .run-mark::before {
+    border-top: 2px dashed var(--muted);
+    opacity: .6;
+}
+
+.is-hidden .run-mark i {
+    background: transparent;
+    border: 1.5px solid var(--muted);
+}
+
+.is-focused .run-mark::before {
+    border-top-width: 3px;
+    top: calc(50% - 1.5px);
+}
+
+.is-focused .run-mark i {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-color) 30%, transparent);
+}
+
+.run-copy strong,
+.run-copy small {
+    display: block;
+}
+
+.run-copy strong {
+    font-size: .76rem;
+}
+
+.legend .run-copy strong {
+    font-size: .68rem;
+    font-weight: 600;
+}
+
+.run-copy small {
+    color: var(--muted);
+    font-size: .62rem;
+    line-height: 1.3;
+    margin-top: .15rem;
+}
+
+.run-state {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: .55rem;
+    letter-spacing: .06em;
+    padding: .1rem .4rem;
+    text-transform: uppercase;
+}
+
+.is-focused .run-state {
+    border-color: var(--series-color);
+    color: var(--ink);
+}
+
+.legend .run-state {
+    display: none;
+}
+
+.clear-focus {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: .4rem;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    font-size: .62rem;
+    justify-self: start;
+    padding: .32rem .55rem;
+}
+
+.clear-focus:hover {
+    background: rgb(100 225 255 / 9%);
+}
+
+.visually-hidden {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .run-toggle {
+        transition: none;
+    }
+}
